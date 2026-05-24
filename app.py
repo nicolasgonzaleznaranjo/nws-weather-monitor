@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
-import math
 import re
 from typing import Any
 
@@ -13,13 +12,15 @@ import plotly.graph_objects as go
 from bs4 import BeautifulSoup
 
 APP_NAME = "NWS Weather Monitor"
-NWS_BASE_URL = "https://api.weather.gov"
-OBHISTORY_BASE_URL = "https://forecast.weather.gov/data/obhistory"
+NWS_API = "https://api.weather.gov"
+OBHISTORY_BASE = "https://forecast.weather.gov/data/obhistory"
+TIMESERIES_BASE = "https://forecast.weather.gov/wrh/timeseries"
 HEADERS = {
-    "User-Agent": "NWS Weather Monitor (personal Streamlit app; contact: user)",
+    "User-Agent": "NWS Weather Monitor (personal Streamlit app)",
     "Accept": "application/geo+json, text/html, */*",
 }
 
+# Airport/station coordinates, not downtown coordinates.
 CITIES = {
     "Atlanta": {"lat": 33.6407, "lon": -84.4277, "tz": "America/New_York", "station": "KATL", "climate": "humid"},
     "Austin": {"lat": 30.1945, "lon": -97.6699, "tz": "America/Chicago", "station": "KAUS", "climate": "hot_humid"},
@@ -51,35 +52,42 @@ def safe_time(dt: datetime) -> str:
 def fmt_temp(value: Any) -> str:
     if value is None or pd.isna(value):
         return "N/A"
-    value = float(value)
-    if abs(value - round(value)) < 0.05:
-        return f"{int(round(value))}°F"
-    return f"{value:.1f}°F"
+    v = float(value)
+    if abs(v - round(v)) < 0.05:
+        return f"{int(round(v))}°F"
+    return f"{v:.1f}°F"
+
+
+def parse_float(text: Any) -> float | None:
+    if text is None:
+        return None
+    s = str(text).replace("°F", "").replace("M", "").strip()
+    if s in {"", "-", "--", "NA", "N/A"}:
+        return None
+    m = re.search(r"-?\d+(?:\.\d+)?", s)
+    return float(m.group()) if m else None
+
+
+def number_from_text(text: Any) -> float | None:
+    return parse_float(text)
 
 
 def c_to_f(v: Any) -> float | None:
-    if v is None:
-        return None
     try:
+        if v is None:
+            return None
         return (float(v) * 9 / 5) + 32
     except Exception:
         return None
 
 
 def mps_to_mph(v: Any) -> float | None:
-    if v is None:
-        return None
     try:
+        if v is None:
+            return None
         return float(v) * 2.23694
     except Exception:
         return None
-
-
-def number_from_text(text: Any) -> float | None:
-    if not text:
-        return None
-    m = re.search(r"-?\d+(?:\.\d+)?", str(text))
-    return float(m.group()) if m else None
 
 
 def heat_index_f(temp_f: float | None, rh: float | None) -> float | None:
@@ -87,8 +95,7 @@ def heat_index_f(temp_f: float | None, rh: float | None) -> float | None:
         return temp_f
     if temp_f < 80 or rh < 40:
         return temp_f
-    t = float(temp_f)
-    r = float(rh)
+    t, r = float(temp_f), float(rh)
     return (
         -42.379 + 2.04901523 * t + 10.14333127 * r - 0.22475541 * t * r
         - 0.00683783 * t * t - 0.05481717 * r * r
@@ -99,38 +106,46 @@ def heat_index_f(temp_f: float | None, rh: float | None) -> float | None:
 
 def sky_from_text(text: str | None, pop: float | None = None) -> int | None:
     t = (text or "").lower()
-    if "clear" in t or "sunny" in t:
+    if "clear" in t or "sunny" in t or "clr" in t:
         return 10
-    if "partly" in t or "few" in t:
+    if "few" in t or "partly" in t or "sct" in t or "scattered" in t:
         return 45
-    if "mostly cloudy" in t or "broken" in t:
+    if "broken" in t or "mostly cloudy" in t or "bkn" in t:
         return 75
-    if "cloudy" in t or "overcast" in t:
+    if "cloudy" in t or "overcast" in t or "ovc" in t:
         return 90
     if pop is not None and pop >= 60:
         return 80
     return None
 
 
-def parse_float(text: str | None) -> float | None:
-    if text is None:
-        return None
-    text = str(text).replace("°F", "").replace("M", "").strip()
-    if text in {"", "-", "--", "NA", "N/A"}:
-        return None
-    m = re.search(r"-?\d+(?:\.\d+)?", text)
-    return float(m.group()) if m else None
+def clean_cell_text(cell) -> str:
+    return " ".join(cell.get_text(" ", strip=True).split())
 
 
-def parse_obhistory_datetime(value: str, tz: ZoneInfo, year: int) -> datetime | None:
-    value = " ".join(value.split())
-    for fmt in ("%b %d, %I:%M %p", "%B %d, %I:%M %p"):
-        try:
-            dt = datetime.strptime(value, fmt).replace(year=year, tzinfo=tz)
-            return dt
-        except ValueError:
-            continue
-    return None
+def expanded_cells(tr) -> list[str]:
+    out: list[str] = []
+    for cell in tr.find_all(["th", "td"]):
+        text = clean_cell_text(cell)
+        span = int(cell.get("colspan", 1) or 1)
+        out.extend([text] * span)
+    return out
+
+
+def parse_wind_compact(text: str) -> tuple[str, float | None]:
+    s = text.strip()
+    direction = "-"
+    speed = None
+    mdir = re.search(r"\b(N|S|E|W|NE|NW|SE|SW|NNE|NNW|ENE|ESE|SSE|SSW|WSW|WNW|CALM|VRB)\b", s, re.I)
+    if mdir:
+        direction = mdir.group(1).upper()
+    nums = re.findall(r"-?\d+(?:\.\d+)?", s)
+    if nums:
+        speed = float(nums[-1])
+    if "CALM" in s.upper():
+        speed = 0.0
+        direction = "CALM"
+    return direction, speed
 
 
 def nws_get_json(url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -139,82 +154,90 @@ def nws_get_json(url: str, params: dict[str, Any] | None = None) -> dict[str, An
     return r.json()
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_forecast(city_name: str) -> pd.DataFrame:
-    city = CITIES[city_name]
-    tz = ZoneInfo(city["tz"])
-    point = nws_get_json(f"{NWS_BASE_URL}/points/{city['lat']:.4f},{city['lon']:.4f}")
-    hourly_url = point["properties"]["forecastHourly"]
-    periods = nws_get_json(hourly_url)["properties"]["periods"]
-
-    rows = []
-    for p in periods:
-        ts = datetime.fromisoformat(p["startTime"]).astimezone(tz).replace(minute=0, second=0, microsecond=0)
-        pop = (p.get("probabilityOfPrecipitation") or {}).get("value")
-        humidity = (p.get("relativeHumidity") or {}).get("value")
-        dew = c_to_f((p.get("dewpoint") or {}).get("value"))
-        temp = p.get("temperature")
-        desc = p.get("shortForecast") or "Forecast"
-        rows.append({
-            "Time": ts,
-            "Source": "FORECAST",
-            "Temp": float(temp) if temp is not None else None,
-            "Dewpoint": dew,
-            "Heat Index": heat_index_f(float(temp), humidity) if temp is not None else None,
-            "Wind mph": number_from_text(p.get("windSpeed")),
-            "Wind Dir": p.get("windDirection") or "-",
-            "Gust mph": number_from_text(p.get("windGust")),
-            "Sky Cover %": sky_from_text(desc, pop),
-            "Precip %": pop,
-            "Humidity %": humidity,
-            "Rain": "Yes" if "rain" in desc.lower() or "shower" in desc.lower() or (pop or 0) >= 50 else "-",
-            "Thunder": "Yes" if "thunder" in desc.lower() or "storm" in desc.lower() else "-",
-            "Description": desc,
-        })
-    return pd.DataFrame(rows)
-
-
 @st.cache_data(ttl=900, show_spinner=False)
 def load_obhistory(city_name: str, today_iso: str) -> pd.DataFrame:
+    """Parse the live NWS station observation history page.
+
+    This intentionally uses forecast.weather.gov/data/obhistory/{station}.html
+    because that page contains the intrahour observations needed for live highs/lows.
+    """
     city = CITIES[city_name]
     tz = ZoneInfo(city["tz"])
     station = city["station"]
     today = datetime.fromisoformat(today_iso).date()
-    url = f"{OBHISTORY_BASE_URL}/{station}.html"
+    url = f"{OBHISTORY_BASE}/{station}.html"
 
     r = requests.get(url, headers={"User-Agent": HEADERS["User-Agent"]}, timeout=20)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
 
-    rows = []
+    rows: list[dict[str, Any]] = []
     for tr in soup.find_all("tr"):
-        cells = [" ".join(td.get_text(" ", strip=True).split()) for td in tr.find_all("td")]
-        if len(cells) < 8:
-            continue
-        dt = parse_obhistory_datetime(cells[0], tz, today.year)
-        if dt is None or dt.date() != today:
+        cells = [clean_cell_text(td) for td in tr.find_all("td")]
+        if len(cells) < 2:
             continue
 
-        temp = parse_float(cells[1])
-        dew = parse_float(cells[2]) if len(cells) > 2 else None
-        rh = parse_float(cells[3]) if len(cells) > 3 else None
-        heat_index = parse_float(cells[4]) if len(cells) > 4 else None
-        wind_chill = parse_float(cells[5]) if len(cells) > 5 else None
-        wind_dir = cells[6] if len(cells) > 6 and cells[6] not in {"", "--"} else "-"
-        wind = parse_float(cells[7]) if len(cells) > 7 else None
-        weather = cells[9] if len(cells) > 9 else "Observed"
-        sky = cells[10] if len(cells) > 10 else ""
-        desc = " / ".join([x for x in [weather, sky] if x and x not in {"--", "-"}]) or "Observed"
+        dt: datetime | None = None
+        temp = dew = rh = heat_index = wind_speed = gust = None
+        wind_dir = "-"
+        desc = "Observed"
+        sky_text = ""
+
+        # Format A, current NWS obhistory:
+        # Date | Time | Wind | Vis | Weather | Sky Cond | Air | Dwpt | 6h Max | 6h Min | RH | ...
+        if re.fullmatch(r"\d{1,2}", cells[0]) and re.search(r"\d{1,2}:\d{2}", cells[1]):
+            day = int(cells[0])
+            hh, mm = [int(x) for x in re.search(r"(\d{1,2}):(\d{2})", cells[1]).groups()]
+            dt = datetime(today.year, today.month, day, hh, mm, tzinfo=tz)
+            # If page includes prior month near month boundary, adjust safely.
+            if (dt.date() - today).days > 10:
+                prev_month = today.month - 1 or 12
+                year = today.year - 1 if prev_month == 12 else today.year
+                dt = datetime(year, prev_month, day, hh, mm, tzinfo=tz)
+
+            wind_dir, wind_speed = parse_wind_compact(cells[2]) if len(cells) > 2 else ("-", None)
+            weather = cells[4] if len(cells) > 4 else ""
+            sky_text = cells[5] if len(cells) > 5 else ""
+            temp = parse_float(cells[6]) if len(cells) > 6 else None
+            dew = parse_float(cells[7]) if len(cells) > 7 else None
+            rh = parse_float(cells[10]) if len(cells) > 10 else None
+            wind_chill = parse_float(cells[11]) if len(cells) > 11 else None
+            heat_index = parse_float(cells[12]) if len(cells) > 12 else None
+            desc = " / ".join([x for x in [weather, sky_text] if x and x not in {"-", "--"}]) or "Observed"
+            if heat_index is None:
+                heat_index = wind_chill or heat_index_f(temp, rh)
+
+        # Format B, older compact data/obhistory page:
+        # May 22, 4:05 am | Temp | Dew Point | RH | Heat Index | Wind Chill | Wind Dir | Wind Speed | Visibility | ...
+        elif re.search(r"[A-Za-z]{3,9}\s+\d{1,2},\s+\d{1,2}:\d{2}\s*(am|pm)", cells[0], re.I):
+            m = re.search(r"([A-Za-z]{3,9})\s+(\d{1,2}),\s+(\d{1,2}:\d{2})\s*(am|pm)", cells[0], re.I)
+            if m:
+                raw = f"{m.group(1)} {m.group(2)} {today.year} {m.group(3)} {m.group(4)}"
+                dt = datetime.strptime(raw, "%b %d %Y %I:%M %p").replace(tzinfo=tz)
+            temp = parse_float(cells[1]) if len(cells) > 1 else None
+            dew = parse_float(cells[2]) if len(cells) > 2 else None
+            rh = parse_float(cells[3]) if len(cells) > 3 else None
+            heat_index = parse_float(cells[4]) if len(cells) > 4 else None
+            wind_chill = parse_float(cells[5]) if len(cells) > 5 else None
+            wind_dir = cells[6] if len(cells) > 6 and cells[6] not in {"", "--"} else "-"
+            wind_speed = parse_float(cells[7]) if len(cells) > 7 else None
+            sky_text = cells[9] if len(cells) > 9 else ""
+            desc = sky_text or "Observed"
+            if heat_index is None:
+                heat_index = wind_chill or heat_index_f(temp, rh)
+
+        if dt is None or dt.date() != today or temp is None:
+            continue
 
         rows.append({
             "Time": dt,
             "Source": "OBSERVED",
             "Temp": temp,
             "Dewpoint": dew,
-            "Heat Index": heat_index or wind_chill or heat_index_f(temp, rh),
-            "Wind mph": wind,
+            "Heat Index": heat_index,
+            "Wind mph": wind_speed,
             "Wind Dir": wind_dir,
-            "Gust mph": None,
+            "Gust mph": gust,
             "Sky Cover %": sky_from_text(desc, 0),
             "Precip %": 100 if "rain" in desc.lower() else 0,
             "Humidity %": rh,
@@ -226,13 +249,160 @@ def load_obhistory(city_name: str, today_iso: str) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     if df.empty:
         return df
-    return df.sort_values("Time").reset_index(drop=True)
+    return df.sort_values("Time").drop_duplicates(subset=["Time"], keep="last").reset_index(drop=True)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_timeseries_forecast(city_name: str) -> pd.DataFrame:
+    """Parse the NWS WRH station timeseries table.
+
+    This is preferred over generic gridpoint forecastHourly because it matches
+    the station-specific NWS table the user manually checks.
+    """
+    city = CITIES[city_name]
+    tz = ZoneInfo(city["tz"])
+    station = city["station"]
+    now = datetime.now(tz)
+    url = f"{TIMESERIES_BASE}?site={station}"
+
+    r = requests.get(url, headers={"User-Agent": HEADERS["User-Agent"]}, timeout=20)
+    r.raise_for_status()
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    wanted = {
+        "date": ["date"],
+        "hour": ["hour"],
+        "temp": ["temperature"],
+        "dew": ["dewpoint"],
+        "heat": ["heat index"],
+        "wind": ["surface wind"],
+        "wind_dir": ["wind dir"],
+        "gust": ["gust"],
+        "sky": ["sky cover"],
+        "pop": ["precipitation potential"],
+        "rh": ["relative humidity"],
+        "rain": ["rain"],
+        "thunder": ["thunder"],
+    }
+
+    row_map: dict[str, list[str]] = {}
+    for tr in soup.find_all("tr"):
+        cells = expanded_cells(tr)
+        if len(cells) < 3:
+            continue
+        label = cells[0].lower()
+        label = re.sub(r"\s+", " ", label)
+        for key, needles in wanted.items():
+            if any(n in label for n in needles):
+                row_map[key] = cells[1:]
+                break
+
+    if "hour" not in row_map or "temp" not in row_map:
+        raise ValueError("Could not parse WRH timeseries table; falling back is required.")
+
+    n = min(len(row_map.get("hour", [])), len(row_map.get("temp", [])))
+    dates = row_map.get("date", [""] * n)
+    hours = row_map.get("hour", [])
+
+    # Fill date row because NWS often uses colspan or blanks.
+    filled_dates: list[str] = []
+    last_date = None
+    for i in range(n):
+        d = dates[i] if i < len(dates) else ""
+        if re.search(r"\d{1,2}/\d{1,2}", d):
+            last_date = re.search(r"\d{1,2}/\d{1,2}", d).group()
+        filled_dates.append(last_date or now.strftime("%m/%d"))
+
+    def get(row: str, i: int) -> Any:
+        vals = row_map.get(row, [])
+        return vals[i] if i < len(vals) else None
+
+    rows: list[dict[str, Any]] = []
+    for i in range(n):
+        hour = parse_float(hours[i])
+        temp = parse_float(get("temp", i))
+        if hour is None or temp is None:
+            continue
+        month, day = [int(x) for x in filled_dates[i].split("/")[:2]]
+        year = now.year
+        dt = datetime(year, month, day, int(hour), 0, tzinfo=tz)
+        # Handle New Year edge.
+        if (dt - now).days < -300:
+            dt = dt.replace(year=year + 1)
+
+        dew = parse_float(get("dew", i))
+        rh = parse_float(get("rh", i))
+        heat = parse_float(get("heat", i)) or heat_index_f(temp, rh)
+        pop = parse_float(get("pop", i))
+        sky = parse_float(get("sky", i))
+        rain = get("rain", i) or "-"
+        thunder = get("thunder", i) or "-"
+        rows.append({
+            "Time": dt,
+            "Source": "FORECAST",
+            "Temp": temp,
+            "Dewpoint": dew,
+            "Heat Index": heat,
+            "Wind mph": parse_float(get("wind", i)),
+            "Wind Dir": get("wind_dir", i) or "-",
+            "Gust mph": parse_float(get("gust", i)),
+            "Sky Cover %": sky,
+            "Precip %": pop,
+            "Humidity %": rh,
+            "Rain": rain if rain not in {"", "--"} else "-",
+            "Thunder": thunder if thunder not in {"", "--"} else "-",
+            "Description": "NWS station forecast",
+        })
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        raise ValueError("WRH timeseries produced no forecast rows.")
+    return df.sort_values("Time").drop_duplicates(subset=["Time"], keep="first").reset_index(drop=True)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_api_forecast_fallback(city_name: str) -> pd.DataFrame:
+    city = CITIES[city_name]
+    tz = ZoneInfo(city["tz"])
+    point = nws_get_json(f"{NWS_API}/points/{city['lat']:.4f},{city['lon']:.4f}")
+    periods = nws_get_json(point["properties"]["forecastHourly"])["properties"]["periods"]
+    rows = []
+    for p in periods:
+        ts = datetime.fromisoformat(p["startTime"]).astimezone(tz).replace(minute=0, second=0, microsecond=0)
+        pop = (p.get("probabilityOfPrecipitation") or {}).get("value")
+        rh = (p.get("relativeHumidity") or {}).get("value")
+        dew = c_to_f((p.get("dewpoint") or {}).get("value"))
+        temp = p.get("temperature")
+        desc = p.get("shortForecast") or "Forecast"
+        rows.append({
+            "Time": ts,
+            "Source": "FORECAST",
+            "Temp": float(temp) if temp is not None else None,
+            "Dewpoint": dew,
+            "Heat Index": heat_index_f(float(temp), rh) if temp is not None else None,
+            "Wind mph": number_from_text(p.get("windSpeed")),
+            "Wind Dir": p.get("windDirection") or "-",
+            "Gust mph": number_from_text(p.get("windGust")),
+            "Sky Cover %": sky_from_text(desc, pop),
+            "Precip %": pop,
+            "Humidity %": rh,
+            "Rain": "Yes" if "rain" in desc.lower() or "shower" in desc.lower() or (pop or 0) >= 50 else "-",
+            "Thunder": "Yes" if "thunder" in desc.lower() or "storm" in desc.lower() else "-",
+            "Description": desc,
+        })
+    return pd.DataFrame(rows)
+
+
+def load_forecast(city_name: str) -> tuple[pd.DataFrame, str]:
+    try:
+        return load_timeseries_forecast(city_name), "NWS WRH station timeseries"
+    except Exception:
+        return load_api_forecast_fallback(city_name), "NWS API forecastHourly fallback"
 
 
 def confidence(row: pd.Series, event_type: str, now: datetime, climate: str) -> int:
     if row.get("Source") == "OBSERVED":
         return 100
-
     hrs = max((row["Time"] - now).total_seconds() / 3600, 0)
     if hrs <= 2:
         score = 88
@@ -252,12 +422,11 @@ def confidence(row: pd.Series, event_type: str, now: datetime, climate: str) -> 
         score = 50
 
     sky = row.get("Sky Cover %")
+    sky = 50 if sky is None or pd.isna(sky) else float(sky)
     pop = row.get("Precip %") or 0
-    humidity = row.get("Humidity %") or 50
+    rh = row.get("Humidity %") or 50
     dew = row.get("Dewpoint") or 50
     wind = row.get("Wind mph") or 5
-
-    sky = 50 if sky is None or pd.isna(sky) else sky
 
     if event_type == "high":
         if pop >= 40 or sky >= 75:
@@ -265,39 +434,41 @@ def confidence(row: pd.Series, event_type: str, now: datetime, climate: str) -> 
         if sky <= 35 and pop <= 20:
             score += 4
         if climate in {"desert", "hot_humid"}:
-            score -= 2  # overshoot risk
+            score -= 2
         if climate in {"marine", "coastal"}:
-            score += 2  # more capped
+            score += 2
     else:
-        if humidity >= 70 and sky >= 60:
+        if rh >= 70 and sky >= 60:
             score += 4
-        if humidity <= 45 and wind <= 6 and sky <= 35:
+        if rh <= 45 and wind <= 6 and sky <= 35:
             score -= 5
         if dew <= 45:
             score -= 2
-
     return int(max(45, min(100, score)))
 
 
 def build_merged_timeline(observed: pd.DataFrame, forecast: pd.DataFrame, now: datetime) -> pd.DataFrame:
     start = datetime.combine(now.date(), time.min, tzinfo=now.tzinfo)
     end = start + timedelta(days=2)
+    next_forecast_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
 
-    observed = observed.copy()
-    forecast = forecast.copy()
-
+    parts = []
     if not observed.empty:
-        observed = observed[(observed["Time"] >= start) & (observed["Time"] <= now)]
+        obs = observed[(observed["Time"] >= start) & (observed["Time"] <= now)].copy()
+        parts.append(obs)
     if not forecast.empty:
-        forecast = forecast[(forecast["Time"] > now) & (forecast["Time"] < end)]
+        fc = forecast[(forecast["Time"] >= next_forecast_hour) & (forecast["Time"] < end)].copy()
+        parts.append(fc)
 
-    merged = pd.concat([observed, forecast], ignore_index=True)
-    if merged.empty:
-        return merged
-    return merged.sort_values("Time").reset_index(drop=True)
+    if not parts:
+        return pd.DataFrame()
+    merged = pd.concat(parts, ignore_index=True).sort_values("Time")
+    return merged.reset_index(drop=True)
 
 
 def extreme(df: pd.DataFrame, date_value, kind: str, now: datetime, climate: str):
+    if df.empty or "Time" not in df or "Temp" not in df:
+        return None
     d = df[(df["Time"].dt.date == date_value) & df["Temp"].notna()]
     if d.empty:
         return None
@@ -306,49 +477,47 @@ def extreme(df: pd.DataFrame, date_value, kind: str, now: datetime, climate: str
     return row, confidence(row, kind, now, climate)
 
 
+def current_temp(observed: pd.DataFrame, forecast: pd.DataFrame, now: datetime):
+    if not observed.empty and observed["Temp"].notna().any():
+        row = observed.sort_values("Time").iloc[-1]
+        return row, "OBSERVED"
+    if not forecast.empty:
+        fc = forecast[forecast["Time"] <= now.replace(minute=0, second=0, microsecond=0)]
+        if not fc.empty:
+            row = fc.sort_values("Time").iloc[-1]
+            return row, "FORECAST"
+    return None, None
+
+
 def metric_card(label: str, item) -> None:
     if item is None:
         st.metric(label, "N/A", "No data")
         return
     row, conf = item
-    source = row["Source"]
-    st.metric(label, fmt_temp(row["Temp"]), f"{safe_time(row['Time'])} · {conf}% · {source}")
+    st.metric(label, fmt_temp(row["Temp"]), f"{safe_time(row['Time'])} · {conf}% · {row['Source']}")
 
 
 def make_chart(df: pd.DataFrame, today_high, today_low, tomorrow_high, tomorrow_low):
     chart_df = df[df["Temp"].notna()].copy()
     if chart_df.empty:
         return None
-
     fig = go.Figure()
     for source, group in chart_df.groupby("Source"):
         fig.add_trace(go.Scatter(
-            x=group["Time"],
-            y=group["Temp"],
-            mode="lines+markers",
-            name=source,
-            hovertemplate="%{x|%a %I:%M %p}<br>%{y:.1f}°F<extra></extra>",
+            x=group["Time"], y=group["Temp"], mode="lines+markers", name=source,
+            hovertemplate="%{x|%a %m/%d %I:%M %p}<br>%{y:.1f}°F<extra></extra>",
         ))
-
-    markers = []
-    for label, item in [
-        ("H", today_high), ("L", today_low), ("H", tomorrow_high), ("L", tomorrow_low)
-    ]:
-        if item is not None:
-            row, _ = item
-            markers.append((label, row["Time"], row["Temp"]))
-
-    for label, x, y in markers:
+    for label, item in [("H", today_high), ("L", today_low), ("H", tomorrow_high), ("L", tomorrow_low)]:
+        if item is None:
+            continue
+        row, _ = item
         fig.add_trace(go.Scatter(
-            x=[x], y=[y], mode="markers+text",
-            text=[label], textposition="top center",
-            marker=dict(size=14, symbol="circle"),
-            name=label,
-            hovertemplate=f"{label}: %{{y:.1f}}°F<br>%{{x|%a %I:%M %p}}<extra></extra>",
+            x=[row["Time"]], y=[row["Temp"]], mode="markers+text", text=[label], textposition="top center",
+            marker=dict(size=14), name=label,
+            hovertemplate=f"{label}: %{{y:.1f}}°F<br>%{{x|%a %m/%d %I:%M %p}}<extra></extra>",
         ))
-
     fig.update_layout(
-        height=360,
+        height=380,
         margin=dict(l=10, r=10, t=25, b=10),
         template="plotly_dark",
         xaxis_title="",
@@ -359,17 +528,22 @@ def make_chart(df: pd.DataFrame, today_high, today_low, tomorrow_high, tomorrow_
     return fig
 
 
-def display_table(df: pd.DataFrame):
+def display_table(df: pd.DataFrame, height: int = 560):
+    if df.empty:
+        st.write("No data.")
+        return
     show = df.copy()
     show["Time"] = show["Time"].dt.strftime("%a %m/%d %I:%M %p")
-    for col in ["Temp", "Dewpoint", "Heat Index", "Wind mph", "Gust mph", "Sky Cover %", "Precip %", "Humidity %"]:
-        show[col] = show[col].apply(lambda x: "-" if x is None or pd.isna(x) else round(float(x), 1))
-    st.dataframe(show, use_container_width=True, height=560)
+    cols = ["Temp", "Dewpoint", "Heat Index", "Wind mph", "Gust mph", "Sky Cover %", "Precip %", "Humidity %"]
+    for col in cols:
+        if col in show:
+            show[col] = show[col].apply(lambda x: "-" if x is None or pd.isna(x) else round(float(x), 1))
+    st.dataframe(show, use_container_width=True, height=height)
 
 
 st.set_page_config(page_title=APP_NAME, layout="wide")
 st.title(APP_NAME)
-st.caption("Fast monitor using official National Weather Service forecast + live station observation history.")
+st.caption("Fast monitor using official NWS station forecast + live station observation history.")
 
 city_name = st.selectbox("City", list(CITIES.keys()))
 city = CITIES[city_name]
@@ -378,16 +552,16 @@ now = datetime.now(tz)
 today = now.date()
 tomorrow = today + timedelta(days=1)
 
-cols = st.columns([1, 4])
-with cols[0]:
+left, right = st.columns([1, 4])
+with left:
     if st.button("Refresh now"):
         st.cache_data.clear()
         st.rerun()
-with cols[1]:
-    st.caption(f"Station: {city['station']} · Local time: {now.strftime('%Y-%m-%d %I:%M %p %Z')} · Observed source: obhistory/{city['station']}.html")
+with right:
+    st.caption(f"Station: {city['station']} · Local time: {now.strftime('%Y-%m-%d %I:%M %p %Z')}")
 
 try:
-    forecast_df = load_forecast(city_name)
+    forecast_df, forecast_source = load_forecast(city_name)
     observed_df = load_obhistory(city_name, today.isoformat())
     df = build_merged_timeline(observed_df, forecast_df, now)
 except Exception as e:
@@ -395,32 +569,31 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
-if df.empty:
-    st.warning("No data available for this city right now.")
-    st.stop()
+cur_row, cur_source = current_temp(observed_df, forecast_df, now)
+st.subheader("Current conditions")
+if cur_row is not None:
+    c0, c1, c2, c3 = st.columns(4)
+    with c0:
+        st.metric("Current Temperature", fmt_temp(cur_row["Temp"]), f"{safe_time(cur_row['Time'])} · {cur_source}")
+    with c1:
+        st.metric("Dewpoint", fmt_temp(cur_row.get("Dewpoint")))
+    with c2:
+        st.metric("Humidity", "N/A" if pd.isna(cur_row.get("Humidity %")) else f"{round(float(cur_row.get('Humidity %')))}%")
+    with c3:
+        st.metric("Description", str(cur_row.get("Description", "-"))[:28])
+else:
+    st.metric("Current Temperature", "N/A")
 
-observed_high = None if observed_df.empty else observed_df.loc[observed_df["Temp"].idxmax()] if observed_df["Temp"].notna().any() else None
-observed_low = None if observed_df.empty else observed_df.loc[observed_df["Temp"].idxmin()] if observed_df["Temp"].notna().any() else None
+if df.empty:
+    st.warning("No observed/forecast data available for this city right now.")
+    st.stop()
 
 today_high = extreme(df, today, "high", now, city["climate"])
 today_low = extreme(df, today, "low", now, city["climate"])
 tomorrow_high = extreme(df, tomorrow, "high", now, city["climate"])
 tomorrow_low = extreme(df, tomorrow, "low", now, city["climate"])
 
-st.subheader("Observed so far")
-o1, o2 = st.columns(2)
-with o1:
-    if observed_high is not None:
-        st.metric("Observed High So Far", fmt_temp(observed_high["Temp"]), f"{safe_time(observed_high['Time'])} · live obhistory")
-    else:
-        st.metric("Observed High So Far", "N/A")
-with o2:
-    if observed_low is not None:
-        st.metric("Observed Low So Far", fmt_temp(observed_low["Temp"]), f"{safe_time(observed_low['Time'])} · live obhistory")
-    else:
-        st.metric("Observed Low So Far", "N/A")
-
-st.subheader("Projected full-day extremes")
+st.subheader("Projected full-day temperatures")
 c1, c2, c3, c4 = st.columns(4)
 with c1:
     metric_card("Today High", today_high)
@@ -435,11 +608,9 @@ fig = make_chart(df, today_high, today_low, tomorrow_high, tomorrow_low)
 if fig is not None:
     st.plotly_chart(fig, use_container_width=True)
 
+st.caption(f"Forecast source: {forecast_source}. Observed source: forecast.weather.gov/data/obhistory/{city['station']}.html")
 st.subheader("Observed + forecast table")
 display_table(df)
 
-with st.expander("Debug: raw observed rows from NWS obhistory"):
-    if observed_df.empty:
-        st.write("No observed rows parsed.")
-    else:
-        display_table(observed_df)
+with st.expander("Debug: raw observed rows"):
+    display_table(observed_df, height=400)
