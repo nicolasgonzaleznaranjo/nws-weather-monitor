@@ -1,12 +1,10 @@
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
-import math
 import re
 
 import pandas as pd
 import requests
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 
 
 APP_NAME = "NWS Weather Monitor"
@@ -42,9 +40,10 @@ CITIES = {
 
 
 def page_setup():
-    st.set_page_config(page_title=APP_NAME, page_icon="NWS", layout="wide")
+    st.set_page_config(page_title=APP_NAME, layout="wide")
     st.markdown(
         """
+        <meta http-equiv="refresh" content="3600">
         <style>
         .stApp {
             background: #0b111b;
@@ -115,8 +114,8 @@ def page_setup():
     )
 
 
-def nws_get(url):
-    response = requests.get(url, headers=HEADERS, timeout=20)
+def nws_get(url, params=None):
+    response = requests.get(url, headers=HEADERS, params=params, timeout=10)
     response.raise_for_status()
     return response.json()
 
@@ -138,8 +137,8 @@ def get_station_list(stations_url):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_observations(station_id, start_iso, end_iso):
-    url = f"{NWS_BASE_URL}/stations/{station_id}/observations?start={start_iso}&end={end_iso}"
-    return nws_get(url)
+    url = f"{NWS_BASE_URL}/stations/{station_id}/observations"
+    return nws_get(url, params={"start": start_iso, "end": end_iso})
 
 
 def c_to_f(value):
@@ -317,7 +316,6 @@ def get_weather_data(city_name, refresh_key):
     now = datetime.now(city_tz)
     start = datetime.combine(now.date(), time.min, tzinfo=city_tz)
     hours = [start + timedelta(hours=i) for i in range(48)]
-    end = hours[-1] + timedelta(hours=1)
 
     point_data = get_point_data(city["lat"], city["lon"])
     props = point_data["properties"]
@@ -517,7 +515,6 @@ def selected_hour_panel(row):
 
 def main():
     page_setup()
-    st_autorefresh(interval=60 * 60 * 1000, key="hourly_auto_refresh")
 
     if "refresh_key" not in st.session_state:
         st.session_state.refresh_key = 0

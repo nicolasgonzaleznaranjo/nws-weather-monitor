@@ -21,12 +21,13 @@ I created one folder:
 nws-weather-monitor
 ```
 
-Inside that folder are three files:
+Inside that folder are four files:
 
 ```text
 nws-weather-monitor/
 |-- streamlit_app.py
 |-- requirements.txt
+|-- runtime.txt
 `-- README.md
 ```
 
@@ -56,7 +57,12 @@ The app needs:
 - `streamlit` for the website
 - `pandas` for tables
 - `requests` for calling the National Weather Service
-- `streamlit-autorefresh` for refreshing every 60 minutes
+
+### `runtime.txt`
+
+This asks Streamlit Cloud to use Python 3.11.
+
+That helps avoid package install problems.
 
 ### `README.md`
 
@@ -137,11 +143,12 @@ nws-weather-monitor
 Inside your new GitHub repository:
 
 1. Click **uploading an existing file**.
-2. Drag these three files into GitHub:
+2. Drag these four files into GitHub:
 
 ```text
 streamlit_app.py
 requirements.txt
+runtime.txt
 README.md
 ```
 
@@ -191,7 +198,44 @@ streamlit_app.py
 
 5. Click **Deploy**.
 
+Important: if you uploaded the whole `nws-weather-monitor` folder into GitHub instead of uploading the four files directly, then the main file path should be:
+
+```text
+nws-weather-monitor/streamlit_app.py
+```
+
 Streamlit will install the packages from `requirements.txt` and run the app.
+
+## If Streamlit Says "Your App Is In The Oven" For Too Long
+
+That usually means Streamlit is still installing packages or cannot find the main app file.
+
+Check these things:
+
+1. Make sure your GitHub repository contains:
+
+```text
+streamlit_app.py
+requirements.txt
+runtime.txt
+README.md
+```
+
+2. Make sure **Main file path** is exactly:
+
+```text
+streamlit_app.py
+```
+
+3. If your files are inside a folder named `nws-weather-monitor`, use this instead:
+
+```text
+nws-weather-monitor/streamlit_app.py
+```
+
+4. In Streamlit Cloud, click **Manage app**.
+5. Click **Reboot app**.
+6. If it still gets stuck, click **Delete app** and deploy it again with the correct main file path.
 
 ## What Buttons To Click In The App
 
