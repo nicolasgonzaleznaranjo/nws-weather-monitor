@@ -447,6 +447,119 @@ def confidence(row: pd.Series, event_type: str, now: datetime, climate: str) -> 
     return int(max(45, min(100, score)))
 
 
+
+
+def classify_heat_regime(row: pd.Series | None, climate: str) -> tuple[str, int, str, str]:
+    """Simple heat retention / heat loss classifier from NWS variables."""
+    if row is None:
+        return "Neutral", 0, "neutral", "No current data"
+
+    def val(name: str, default=None):
+        x = row.get(name, default)
+        if x is None or pd.isna(x):
+            return default
+        try:
+            return float(x)
+        except Exception:
+            return default
+
+    temp = val("Temp")
+    dew = val("Dewpoint")
+    heat = val("Heat Index")
+    wind = val("Wind mph")
+    gust = val("Gust mph")
+    sky = val("Sky Cover %")
+    pop = val("Precip %")
+    rh = val("Humidity %")
+    rain = str(row.get("Rain", "-")).lower()
+    thunder = str(row.get("Thunder", "-")).lower()
+
+    score = 0
+    reasons: list[str] = []
+
+    if dew is not None:
+        if dew >= 70:
+            score += 3; reasons.append("very high dewpoint")
+        elif dew >= 65:
+            score += 2; reasons.append("high dewpoint")
+        elif dew <= 40:
+            score -= 2; reasons.append("dry air")
+        elif dew <= 50:
+            score -= 1; reasons.append("moderately dry air")
+
+    if rh is not None:
+        if rh >= 85:
+            score += 2; reasons.append("high humidity")
+        elif rh >= 70:
+            score += 1; reasons.append("moderate humidity")
+        elif rh <= 40:
+            score -= 2; reasons.append("low humidity")
+
+    if sky is not None:
+        if sky >= 70:
+            score += 2; reasons.append("cloud cover")
+        elif sky >= 50:
+            score += 1; reasons.append("partial cloud cover")
+        elif sky <= 20:
+            score -= 2; reasons.append("clear sky")
+        elif sky <= 35:
+            score -= 1; reasons.append("mostly clear")
+
+    if wind is not None:
+        if wind <= 3:
+            score -= 1; reasons.append("calm wind")
+        elif wind >= 12:
+            score += 1; reasons.append("wind mixing")
+    if gust is not None and gust >= 20:
+        score += 1; reasons.append("gusty mixing")
+
+    if pop is not None:
+        if pop >= 50:
+            score += 2; reasons.append("high precip risk")
+        elif pop >= 25:
+            score += 1; reasons.append("some precip risk")
+    if rain not in {"", "-", "--", "none", "nan"}:
+        score += 2; reasons.append("rain")
+    if thunder not in {"", "-", "--", "none", "nan"}:
+        score += 1; reasons.append("thunder risk")
+
+    if heat is not None and temp is not None:
+        if heat - temp >= 5:
+            score += 2; reasons.append("heat index premium")
+        elif heat > temp:
+            score += 1; reasons.append("humid heat")
+
+    if climate in {"humid", "hot_humid", "tropical"}:
+        score += 1; reasons.append("humid city")
+    elif climate in {"desert", "dry"}:
+        score -= 1; reasons.append("dry city")
+    elif climate in {"marine", "coastal"}:
+        score += 1; reasons.append("marine/coastal cap")
+
+    if score >= 2:
+        return "Heat Retention", score, "retention", ", ".join(reasons[:4]) or "Moist/stable setup"
+    if score <= -2:
+        return "Heat Loss", score, "loss", ", ".join(reasons[:4]) or "Dry/cooling setup"
+    return "Neutral", score, "neutral", ", ".join(reasons[:4]) or "Mixed setup"
+
+
+def heat_badge_html(label: str, score: int, kind: str, reasons: str) -> str:
+    if kind == "retention":
+        bg = "linear-gradient(135deg, #7f1d1d, #b45309)"
+        border = "#f59e0b"
+    elif kind == "loss":
+        bg = "linear-gradient(135deg, #0f172a, #1d4ed8)"
+        border = "#38bdf8"
+    else:
+        bg = "linear-gradient(135deg, #27272a, #52525b)"
+        border = "#a1a1aa"
+    return f"""
+    <div class="heat-badge" style="background:{bg}; border:1px solid {border};">
+        <div class="heat-badge-title">{label}</div>
+        <div class="heat-badge-sub">Score {score} · {reasons}</div>
+    </div>
+    """
+
 def build_merged_timeline(observed: pd.DataFrame, forecast: pd.DataFrame, now: datetime) -> pd.DataFrame:
     start = datetime.combine(now.date(), time.min, tzinfo=now.tzinfo)
     end = start + timedelta(days=2)
@@ -541,7 +654,33 @@ def display_table(df: pd.DataFrame, height: int = 560):
     st.dataframe(show, use_container_width=True, height=height)
 
 
-st.set_page_config(page_title=APP_NAME, layout="wide")
+
+st.set_page_config(page_title=APP_NAME, layout="wide", initial_sidebar_state="collapsed")
+
+st.markdown(
+    """
+    <style>
+    .block-container {padding-top: 1.0rem; padding-bottom: 1rem; max-width: 1500px;}
+    h1 {font-size: 1.65rem !important; margin-bottom: 0.15rem !important;}
+    h2, h3 {margin-top: 0.75rem !important;}
+    [data-testid="stMetric"] {background: #111827; border: 1px solid #283142; border-radius: 14px; padding: 12px 14px;}
+    [data-testid="stMetricLabel"] {font-size: 0.78rem; color: #cbd5e1;}
+    [data-testid="stMetricValue"] {font-size: 1.7rem;}
+    .heat-badge {border-radius: 16px; padding: 14px 16px; margin: 6px 0 10px 0; box-shadow: 0 8px 24px rgba(0,0,0,.22);}
+    .heat-badge-title {font-weight: 800; font-size: 1.0rem; letter-spacing: .04em; text-transform: uppercase; color: white;}
+    .heat-badge-sub {font-size: .82rem; color: rgba(255,255,255,.84); margin-top: 3px;}
+    @media (max-width: 768px) {
+        .block-container {padding-left: .75rem; padding-right: .75rem; padding-top: .55rem;}
+        h1 {font-size: 1.35rem !important;}
+        [data-testid="stMetric"] {padding: 10px 11px;}
+        [data-testid="stMetricValue"] {font-size: 1.45rem;}
+        .heat-badge {padding: 12px; border-radius: 14px;}
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title(APP_NAME)
 st.caption("Fast monitor using official NWS station forecast + live station observation history.")
 
@@ -552,12 +691,12 @@ now = datetime.now(tz)
 today = now.date()
 tomorrow = today + timedelta(days=1)
 
-left, right = st.columns([1, 4])
-with left:
-    if st.button("Refresh now"):
+ctrl1, ctrl2 = st.columns([1, 3])
+with ctrl1:
+    if st.button("Refresh now", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
-with right:
+with ctrl2:
     st.caption(f"Station: {city['station']} · Local time: {now.strftime('%Y-%m-%d %I:%M %p %Z')}")
 
 try:
@@ -569,7 +708,38 @@ except Exception as e:
     st.exception(e)
     st.stop()
 
+if df.empty:
+    st.warning("No observed/forecast data available for this city right now.")
+    st.stop()
+
 cur_row, cur_source = current_temp(observed_df, forecast_df, now)
+regime_label, regime_score, regime_kind, regime_reasons = classify_heat_regime(cur_row, city["climate"])
+
+today_high = extreme(df, today, "high", now, city["climate"])
+today_low = extreme(df, today, "low", now, city["climate"])
+tomorrow_high = extreme(df, tomorrow, "high", now, city["climate"])
+tomorrow_low = extreme(df, tomorrow, "low", now, city["climate"])
+
+st.subheader("Today projected temperatures")
+mobile_a, mobile_b = st.columns(2)
+with mobile_a:
+    metric_card("Today High", today_high)
+with mobile_b:
+    metric_card("Today Low", today_low)
+
+st.markdown(heat_badge_html(regime_label, regime_score, regime_kind, regime_reasons), unsafe_allow_html=True)
+
+with st.expander("Tomorrow projected temperatures", expanded=False):
+    t1, t2 = st.columns(2)
+    with t1:
+        metric_card("Tomorrow High", tomorrow_high)
+    with t2:
+        metric_card("Tomorrow Low", tomorrow_low)
+
+fig = make_chart(df, today_high, today_low, tomorrow_high, tomorrow_low)
+if fig is not None:
+    st.plotly_chart(fig, use_container_width=True)
+
 st.subheader("Current conditions")
 if cur_row is not None:
     c0, c1, c2, c3 = st.columns(4)
@@ -583,30 +753,6 @@ if cur_row is not None:
         st.metric("Description", str(cur_row.get("Description", "-"))[:28])
 else:
     st.metric("Current Temperature", "N/A")
-
-if df.empty:
-    st.warning("No observed/forecast data available for this city right now.")
-    st.stop()
-
-today_high = extreme(df, today, "high", now, city["climate"])
-today_low = extreme(df, today, "low", now, city["climate"])
-tomorrow_high = extreme(df, tomorrow, "high", now, city["climate"])
-tomorrow_low = extreme(df, tomorrow, "low", now, city["climate"])
-
-st.subheader("Projected full-day temperatures")
-c1, c2, c3, c4 = st.columns(4)
-with c1:
-    metric_card("Today High", today_high)
-with c2:
-    metric_card("Today Low", today_low)
-with c3:
-    metric_card("Tomorrow High", tomorrow_high)
-with c4:
-    metric_card("Tomorrow Low", tomorrow_low)
-
-fig = make_chart(df, today_high, today_low, tomorrow_high, tomorrow_low)
-if fig is not None:
-    st.plotly_chart(fig, use_container_width=True)
 
 st.caption(f"Forecast source: {forecast_source}. Observed source: forecast.weather.gov/data/obhistory/{city['station']}.html")
 st.subheader("Observed + forecast table")
