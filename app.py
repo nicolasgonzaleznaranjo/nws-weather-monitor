@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 import re
+from html import escape
+from urllib.parse import quote
 from typing import Any
 
 import pandas as pd
@@ -684,7 +686,34 @@ st.markdown(
 st.title(APP_NAME)
 st.caption("Fast monitor using official NWS station forecast + live station observation history.")
 
-city_name = st.selectbox("City", list(CITIES.keys()))
+def get_query_city() -> str:
+    try:
+        value = st.query_params.get("city", "Atlanta")
+        if isinstance(value, list):
+            value = value[0] if value else "Atlanta"
+        return value if value in CITIES else "Atlanta"
+    except Exception:
+        return "Atlanta"
+
+city_name = get_query_city()
+
+# Native browser dropdown. This avoids opening the phone keyboard,
+# unlike Streamlit's searchable selectbox on mobile.
+options_html = "".join(
+    f'<option value="{quote(name)}" {"selected" if name == city_name else ""}>{escape(name)}</option>'
+    for name in CITIES.keys()
+)
+select_html = f"""
+<form method="get" style="margin: 0 0 0.75rem 0;">
+    <label for="city-select" style="display:block; font-size:0.85rem; font-weight:700; margin-bottom:0.35rem; color:#e5e7eb;">City</label>
+    <select id="city-select" name="city" onchange="this.form.submit()"
+        style="width:100%; background:#1f2430; color:#ffffff; border:1px solid #374151; border-radius:10px; padding:0.75rem 0.85rem; font-size:1rem; appearance:auto; -webkit-appearance:menulist;">
+        {options_html}
+    </select>
+</form>
+"""
+st.markdown(select_html, unsafe_allow_html=True)
+
 city = CITIES[city_name]
 tz = ZoneInfo(city["tz"])
 now = datetime.now(tz)
