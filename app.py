@@ -4,7 +4,7 @@ from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 import re
 from html import escape
-from urllib.parse import quote
+from urllib.parse import unquote
 from typing import Any
 
 import pandas as pd
@@ -691,6 +691,7 @@ def get_query_city() -> str:
         value = st.query_params.get("city", "Atlanta")
         if isinstance(value, list):
             value = value[0] if value else "Atlanta"
+        value = unquote(str(value))
         return value if value in CITIES else "Atlanta"
     except Exception:
         return "Atlanta"
@@ -700,7 +701,7 @@ city_name = get_query_city()
 # Native browser dropdown. This avoids opening the phone keyboard,
 # unlike Streamlit's searchable selectbox on mobile.
 options_html = "".join(
-    f'<option value="{quote(name)}" {"selected" if name == city_name else ""}>{escape(name)}</option>'
+    f'<option value="{escape(name, quote=True)}" {"selected" if name == city_name else ""}>{escape(name)}</option>'
     for name in CITIES.keys()
 )
 select_html = f"""
