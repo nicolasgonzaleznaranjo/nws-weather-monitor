@@ -247,6 +247,10 @@ Use the city dropdown near the top of the page.
 
 Pick the city you want to monitor.
 
+On most browsers, the app updates as soon as you choose a city.
+
+If your phone browser does not update immediately, tap **Apply city** under the dropdown.
+
 ### Refresh now
 
 Click **Refresh now** if you want the newest National Weather Service data immediately.
