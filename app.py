@@ -258,6 +258,50 @@ def _parse_obhistory_html(html_text):
     return pd.DataFrame()
 
 
+def parse_obhistory_datetime(raw_dt, now, tz):
+    text = str(raw_dt).replace("\xa0", " ").strip()
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\s+(EDT|EST|CDT|CST|MDT|MST|PDT|PST|MST|AKDT|AKST|HST)$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\b(am|pm)\b", lambda m: m.group(1).upper(), text, flags=re.IGNORECASE)
+
+    formats = [
+        "%d %b %I:%M %p",
+        "%d %B %I:%M %p",
+        "%b %d %I:%M %p",
+        "%B %d %I:%M %p",
+        "%b %d, %I:%M %p",
+        "%B %d, %I:%M %p",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d %I:%M %p",
+    ]
+
+    for fmt in formats:
+        try:
+            dt_naive = datetime.strptime(text, fmt)
+            if dt_naive.year == 1900:
+                dt_naive = dt_naive.replace(year=now.year)
+            parsed = dt_naive.replace(tzinfo=tz)
+            if parsed - now > timedelta(days=30):
+                parsed = parsed.replace(year=parsed.year - 1)
+            return parsed
+        except Exception:
+            continue
+
+    parsed = pd.to_datetime(text, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    dt_naive = parsed.to_pydatetime()
+    if dt_naive.year == 1900:
+        dt_naive = dt_naive.replace(year=now.year)
+    if dt_naive.tzinfo is None:
+        parsed_dt = dt_naive.replace(tzinfo=tz)
+    else:
+        parsed_dt = dt_naive.astimezone(tz)
+    if parsed_dt - now > timedelta(days=30):
+        parsed_dt = parsed_dt.replace(year=parsed_dt.year - 1)
+    return parsed_dt
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_obhistory(station, tz_name):
     url = f"https://forecast.weather.gov/data/obhistory/{station}.html"
@@ -301,17 +345,7 @@ def fetch_obhistory(station, tz_name):
         if not raw_dt or raw_dt.lower() == "nan":
             continue
 
-        parsed = None
-        cleaned_dt = re.sub(r"\s+", " ", raw_dt)
-        for fmt in ["%B %d, %I:%M %p", "%b %d, %I:%M %p"]:
-            try:
-                dt_naive = datetime.strptime(cleaned_dt, fmt)
-                parsed = dt_naive.replace(year=now.year, tzinfo=tz)
-                if parsed - now > timedelta(days=30):
-                    parsed = parsed.replace(year=now.year - 1)
-                break
-            except Exception:
-                continue
+        parsed = parse_obhistory_datetime(raw_dt, now, tz)
         if parsed is None:
             continue
 
@@ -442,6 +476,9 @@ def score_heat_regime(row, city_regime):
 
 
 def confidence_for_event(event_dt, event_type, row, city_regime):
+    if row is not None and str(row.get("source", "")).upper() == "OBSERVED":
+        return 100
+
     now = local_now(event_dt.tzinfo.key if hasattr(event_dt.tzinfo, "key") else "UTC")
     hours = max(0, (event_dt - now).total_seconds() / 3600)
     if hours <= 2: base = 88
