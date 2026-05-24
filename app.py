@@ -1,5 +1,6 @@
 import math
 import re
+from html.parser import HTMLParser
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 
@@ -176,41 +177,126 @@ def fetch_hourly_forecast(lat, lon, tz_name):
     return pd.DataFrame(rows)
 
 
+class _TableParser(HTMLParser):
+    """Very small HTML table parser using only Python standard library."""
+    def __init__(self):
+        super().__init__()
+        self.tables = []
+        self._in_table = False
+        self._in_row = False
+        self._in_cell = False
+        self._current_table = []
+        self._current_row = []
+        self._current_cell = []
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if tag == "table":
+            self._in_table = True
+            self._current_table = []
+        elif self._in_table and tag == "tr":
+            self._in_row = True
+            self._current_row = []
+        elif self._in_row and tag in {"td", "th"}:
+            self._in_cell = True
+            self._current_cell = []
+
+    def handle_data(self, data):
+        if self._in_cell:
+            text = data.strip()
+            if text:
+                self._current_cell.append(text)
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if self._in_cell and tag in {"td", "th"}:
+            cell = " ".join(self._current_cell)
+            cell = re.sub(r"\s+", " ", cell).strip()
+            self._current_row.append(cell)
+            self._in_cell = False
+        elif self._in_row and tag == "tr":
+            if self._current_row:
+                self._current_table.append(self._current_row)
+            self._in_row = False
+        elif self._in_table and tag == "table":
+            if self._current_table:
+                self.tables.append(self._current_table)
+            self._in_table = False
+
+
+def _parse_obhistory_html(html_text):
+    parser = _TableParser()
+    parser.feed(html_text)
+
+    selected = None
+    for table in parser.tables:
+        joined = " ".join(" ".join(row) for row in table[:4]).lower()
+        if "date/time" in joined and "temp" in joined and "dew" in joined:
+            selected = table
+            break
+
+    if not selected:
+        return pd.DataFrame()
+
+    # Usually the first row is the header. Some NWS pages may have multiple header rows;
+    # find the row that contains Date/Time and Temp.
+    header_idx = 0
+    for i, row in enumerate(selected[:5]):
+        j = " ".join(row).lower()
+        if "date/time" in j and "temp" in j:
+            header_idx = i
+            break
+
+    headers = selected[header_idx]
+    data_rows = selected[header_idx + 1:]
+
+    # Normalize uneven rows without crashing.
+    width = len(headers)
+    normalized = []
+    for row in data_rows:
+        if len(row) < 2:
+            continue
+        if len(row) < width:
+            row = row + [None] * (width - len(row))
+        elif len(row) > width:
+            row = row[:width]
+        normalized.append(row)
+
+    if not normalized:
+        return pd.DataFrame()
+
+    return pd.DataFrame(normalized, columns=headers)
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_obhistory(station, tz_name):
     url = f"https://forecast.weather.gov/data/obhistory/{station}.html"
-    html = requests.get(url, headers={"User-Agent": NWS_HEADERS["User-Agent"]}, timeout=25)
-    html.raise_for_status()
+    response = requests.get(url, headers={"User-Agent": NWS_HEADERS["User-Agent"]}, timeout=25)
+    response.raise_for_status()
 
-    tables = pd.read_html(html.text)
-    if not tables:
+    df = _parse_obhistory_html(response.text)
+    if df.empty:
         return pd.DataFrame()
 
-    df = tables[0].copy()
-    # Flatten multi-index columns if present
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [" ".join([str(x) for x in col if str(x) != "nan"]).strip() for col in df.columns]
-    else:
-        df.columns = [str(c).strip() for c in df.columns]
+    df.columns = [str(c).strip() for c in df.columns]
 
-    # Find useful columns robustly
-    def find_col(patterns):
-        for col in df.columns:
-            low = col.lower()
-            if all(p in low for p in patterns):
-                return col
+    def find_col(options):
+        for option in options:
+            for col in df.columns:
+                low = col.lower()
+                if all(part in low for part in option):
+                    return col
         return None
 
-    date_col = find_col(["date/time"]) or find_col(["date"])
-    temp_col = find_col(["temp"]) or find_col(["air"])
-    dew_col = find_col(["dew"])
-    rh_col = find_col(["relative", "humidity"])
-    heat_col = find_col(["heat", "index"])
-    wind_dir_col = find_col(["wind", "direction"])
-    wind_speed_col = find_col(["wind", "speed"])
-    vis_col = find_col(["visibility"])
-    clouds_col = find_col(["cloud"])
-    weather_col = find_col(["weather"])
+    date_col = find_col([["date/time"], ["date"]])
+    temp_col = find_col([["temp"], ["air"]])
+    dew_col = find_col([["dew"]])
+    rh_col = find_col([["relative", "humidity"], ["humidity"]])
+    heat_col = find_col([["heat", "index"]])
+    wind_dir_col = find_col([["wind", "direction"], ["wind", "dir"]])
+    wind_speed_col = find_col([["wind", "speed"]])
+    clouds_col = find_col([["cloud"]])
+    weather_col = find_col([["weather"]])
 
     tz = ZoneInfo(tz_name)
     now = local_now(tz)
@@ -220,24 +306,25 @@ def fetch_obhistory(station, tz_name):
         raw_dt = str(r.get(date_col, "")).strip() if date_col else ""
         if not raw_dt or raw_dt.lower() == "nan":
             continue
-        # examples: "May 24, 10:52 am" or "May 24, 10:50 am"
+
         parsed = None
+        cleaned_dt = re.sub(r"\s+", " ", raw_dt)
         for fmt in ["%B %d, %I:%M %p", "%b %d, %I:%M %p"]:
             try:
-                dt_naive = datetime.strptime(raw_dt.replace("  ", " "), fmt)
+                dt_naive = datetime.strptime(cleaned_dt, fmt)
                 parsed = dt_naive.replace(year=now.year, tzinfo=tz)
-                # If Dec/Jan boundary ever happens, adjust if future by > 30d
                 if parsed - now > timedelta(days=30):
                     parsed = parsed.replace(year=now.year - 1)
                 break
             except Exception:
-                pass
+                continue
         if parsed is None:
             continue
 
         temp = safe_float(r.get(temp_col)) if temp_col else None
         if temp is None:
             continue
+
         dew = safe_float(r.get(dew_col)) if dew_col else None
         rh = safe_float(r.get(rh_col)) if rh_col else None
         heat = safe_float(r.get(heat_col)) if heat_col else temp
@@ -262,12 +349,12 @@ def fetch_obhistory(station, tz_name):
             "humidity": rh,
             "rain": "Yes" if "rain" in desc.lower() else "-",
             "thunder": "Yes" if "thunder" in desc.lower() else "-",
-            "description": desc if desc not in ["nan", ""] else clouds,
+            "description": desc if desc not in ["nan", "", "None"] else clouds,
         })
 
     out = pd.DataFrame(rows)
     if not out.empty:
-        out = out.sort_values("datetime")
+        out = out.sort_values("datetime").reset_index(drop=True)
     return out
 
 # -----------------------------
