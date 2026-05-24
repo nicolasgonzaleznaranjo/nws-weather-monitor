@@ -1,5 +1,4 @@
 import re
-from html import escape
 from io import StringIO
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
@@ -56,35 +55,13 @@ st.markdown(
     .loss { background: linear-gradient(90deg, #064e8a, #0873b8); border: 1px solid #4cc9f0; }
     .neutral { background: linear-gradient(90deg, #343a46, #4b5563); border: 1px solid #9ca3af; }
     .source-pill { font-size: .78rem; color: #b8bec9; }
-    .city-form { margin: 0 0 1rem 0; }
-    .city-form label {
-        display: block;
-        color: #f5f5f5;
-        font-size: 0.9rem;
-        font-weight: 700;
-        margin: 0 0 0.45rem 0;
-    }
-    .city-form select {
-        width: 100%;
-        min-height: 44px;
-        border-radius: 8px;
+    div[role="radiogroup"] {
+        background: #151a24;
         border: 1px solid #303746;
-        background: #262730;
-        color: #ffffff;
-        font-size: 16px;
-        font-weight: 700;
-        padding: 10px 12px;
-    }
-    .city-form button {
-        margin-top: 0.55rem;
-        border: 1px solid #303746;
-        border-radius: 8px;
-        background: #111827;
-        color: #ffffff;
-        font-size: 0.9rem;
-        font-weight: 700;
-        padding: 0.5rem 0.8rem;
-        cursor: pointer;
+        border-radius: 10px;
+        padding: 0.75rem 1rem;
+        max-height: 230px;
+        overflow-y: auto;
     }
     @media (max-width: 700px) {
         .block-container { padding-left: .85rem; padding-right: .85rem; padding-top: .6rem; }
@@ -157,39 +134,31 @@ def set_query_city(city):
         st.experimental_set_query_params(city=city)
 
 
-def sync_selected_city():
+def choose_city():
     query_city = get_query_city()
+
     if "selected_city" not in st.session_state:
         st.session_state.selected_city = query_city or "Atlanta"
-    elif query_city and query_city != st.session_state.selected_city:
+
+    last_synced_city = st.session_state.get("_last_synced_city")
+    if query_city and query_city != last_synced_city and query_city != st.session_state.selected_city:
         st.session_state.selected_city = query_city
 
     if st.session_state.selected_city not in CITIES:
         st.session_state.selected_city = "Atlanta"
 
-    if query_city != st.session_state.selected_city:
-        set_query_city(st.session_state.selected_city)
-
-    return st.session_state.selected_city
-
-
-def render_city_dropdown(selected_city):
-    options_html = "\n".join(
-        f'<option value="{escape(city)}" {"selected" if city == selected_city else ""}>{escape(city)}</option>'
-        for city in CITIES
+    selected_city = st.radio(
+        "City",
+        list(CITIES.keys()),
+        key="selected_city",
+        label_visibility="visible",
     )
-    st.markdown(
-        f"""
-        <form class="city-form" method="get">
-            <label for="city-select">City</label>
-            <select id="city-select" name="city">
-                {options_html}
-            </select>
-            <button type="submit">Apply city</button>
-        </form>
-        """,
-        unsafe_allow_html=True,
-    )
+
+    if get_query_city() != selected_city:
+        set_query_city(selected_city)
+
+    st.session_state._last_synced_city = selected_city
+    return selected_city
 
 
 def parse_wind_speed(text):
@@ -555,8 +524,7 @@ def plot_temperature(timeline, today_hi, today_lo, tomorrow_hi, tomorrow_lo):
 st.title("NWS Weather Monitor")
 st.caption("Fast monitor using official NWS station forecast + live station observation history.")
 
-selected_city = sync_selected_city()
-render_city_dropdown(selected_city)
+selected_city = choose_city()
 city_cfg = CITIES[selected_city]
 
 col_refresh, col_meta = st.columns([1, 4])

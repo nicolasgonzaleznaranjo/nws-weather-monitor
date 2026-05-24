@@ -241,15 +241,13 @@ nws-weather-monitor/app.py
 
 ## What Buttons To Click In The App
 
-### City dropdown
+### City selector
 
-Use the city dropdown near the top of the page.
+Use the city selector near the top of the page.
 
 Pick the city you want to monitor.
 
-On most browsers, the app updates as soon as you choose a city.
-
-If your phone browser does not update immediately, tap **Apply city** under the dropdown.
+The app updates as soon as you choose a city.
 
 ### Refresh now
 
