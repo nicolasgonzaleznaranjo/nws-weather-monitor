@@ -192,6 +192,19 @@ def c_to_f(c):
     return float(c) * 9 / 5 + 32
 
 
+def mps_to_mph(value):
+    if value is None:
+        return None
+    return float(value) * 2.23694
+
+
+def degrees_to_compass(degrees):
+    if degrees is None:
+        return "-"
+    directions = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+    return directions[round(float(degrees) / 22.5) % 16]
+
+
 def get_nested_value(obj, key):
     val = obj.get(key)
     if isinstance(val, dict):
@@ -303,18 +316,80 @@ def parse_obhistory_datetime(raw_dt, now, tz):
 
 
 @st.cache_data(ttl=900, show_spinner=False)
+def fetch_observations_api(station, tz_name):
+    tz = ZoneInfo(tz_name)
+    now = local_now(tz_name)
+    start = datetime.combine(now.date(), time.min, tzinfo=tz)
+    url = f"https://api.weather.gov/stations/{station}/observations"
+    response = requests.get(
+        url,
+        headers=NWS_HEADERS,
+        params={"start": start.isoformat(), "end": now.isoformat()},
+        timeout=20,
+    )
+    response.raise_for_status()
+
+    rows = []
+    for feature in response.json().get("features", []):
+        props = feature.get("properties", {})
+        timestamp = props.get("timestamp")
+        if not timestamp:
+            continue
+
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(tz)
+        temp = c_to_f(get_nested_value(props, "temperature"))
+        if temp is None:
+            continue
+
+        dew = c_to_f(get_nested_value(props, "dewpoint"))
+        rh = safe_float(get_nested_value(props, "relativeHumidity"))
+        wind = mps_to_mph(get_nested_value(props, "windSpeed"))
+        gust = mps_to_mph(get_nested_value(props, "windGust"))
+        wind_dir = degrees_to_compass(get_nested_value(props, "windDirection"))
+        desc = props.get("textDescription") or "Observed"
+
+        rows.append({
+            "datetime": parsed,
+            "date": parsed.date(),
+            "hour": parsed.hour,
+            "time": parsed.strftime("%a %-I:%M %p"),
+            "source": "OBSERVED",
+            "temp": temp,
+            "dewpoint": dew,
+            "heat_index": temp,
+            "wind_mph": wind,
+            "wind_dir": wind_dir,
+            "gust_mph": gust,
+            "sky_cover": None,
+            "precip": None,
+            "humidity": rh,
+            "rain": "Yes" if "rain" in desc.lower() or "shower" in desc.lower() else "-",
+            "thunder": "Yes" if "thunder" in desc.lower() or "storm" in desc.lower() else "-",
+            "description": desc,
+        })
+
+    out = pd.DataFrame(rows)
+    if not out.empty:
+        out = out.sort_values("datetime").reset_index(drop=True)
+    return out
+
+
+@st.cache_data(ttl=900, show_spinner=False)
 def fetch_obhistory(station, tz_name):
     url = f"https://forecast.weather.gov/data/obhistory/{station}.html"
-    response = requests.get(url, headers={"User-Agent": NWS_HEADERS["User-Agent"]}, timeout=25)
-    response.raise_for_status()
+    try:
+        response = requests.get(url, headers={"User-Agent": NWS_HEADERS["User-Agent"]}, timeout=25)
+        response.raise_for_status()
+    except Exception:
+        return fetch_observations_api(station, tz_name)
 
     try:
         df = _parse_obhistory_html(response.text)
     except Exception:
-        return pd.DataFrame()
+        return fetch_observations_api(station, tz_name)
 
     if df.empty:
-        return pd.DataFrame()
+        return fetch_observations_api(station, tz_name)
 
     df.columns = [str(c).strip() for c in df.columns]
 
@@ -383,6 +458,8 @@ def fetch_obhistory(station, tz_name):
     out = pd.DataFrame(rows)
     if not out.empty:
         out = out.sort_values("datetime").reset_index(drop=True)
+    else:
+        out = fetch_observations_api(station, tz_name)
     return out
 
 # -----------------------------
@@ -534,6 +611,37 @@ def extremes_for_date(timeline, target_date):
     return hi_row, lo_row
 
 
+def projected_extremes_for_date(obs_df, fc_df, target_date, tz_name):
+    tz = ZoneInfo(tz_name)
+    now = local_now(tz_name)
+    start = datetime.combine(target_date, time.min, tzinfo=tz)
+    end = datetime.combine(target_date, time(23, 59), tzinfo=tz)
+
+    if target_date == now.date():
+        observed_today = obs_df[
+            (obs_df["datetime"] >= start) & (obs_df["datetime"] <= now)
+        ].copy() if not obs_df.empty else pd.DataFrame()
+        forecast_rest_today = fc_df[
+            (fc_df["datetime"] > now) & (fc_df["datetime"] <= end)
+        ].copy() if not fc_df.empty else pd.DataFrame()
+        candidates = pd.concat([observed_today, forecast_rest_today], ignore_index=True)
+    else:
+        candidates = fc_df[
+            (fc_df["datetime"] >= start) & (fc_df["datetime"] <= end)
+        ].copy() if not fc_df.empty else pd.DataFrame()
+
+    if candidates.empty:
+        return None, None
+
+    valid = candidates.dropna(subset=["temp"])
+    if valid.empty:
+        return None, None
+
+    hi_row = valid.loc[valid["temp"].idxmax()].to_dict()
+    lo_row = valid.loc[valid["temp"].idxmin()].to_dict()
+    return hi_row, lo_row
+
+
 def plot_temperature(timeline, today_hi, today_lo, tomorrow_hi, tomorrow_lo):
     fig = go.Figure()
     for source, color in [("OBSERVED", "#ff5a3d"), ("FORECAST", "#5b6cff")]:
@@ -609,8 +717,8 @@ except Exception:
 timeline = build_timeline(observed_df, forecast_df, tz_name)
 today = now.date()
 tomorrow = today + timedelta(days=1)
-today_hi, today_lo = extremes_for_date(timeline, today)
-tomorrow_hi, tomorrow_lo = extremes_for_date(timeline, tomorrow)
+today_hi, today_lo = projected_extremes_for_date(observed_df, forecast_df, today, tz_name)
+tomorrow_hi, tomorrow_lo = projected_extremes_for_date(observed_df, forecast_df, tomorrow, tz_name)
 
 st.subheader("Today projected temperatures")
 
