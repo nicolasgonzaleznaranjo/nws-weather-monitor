@@ -1,4 +1,5 @@
 import re
+from html import escape
 from io import StringIO
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
@@ -7,7 +8,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
-import streamlit.components.v1 as components
 
 st.set_page_config(page_title="NWS Weather Monitor", layout="wide", initial_sidebar_state="collapsed")
 
@@ -56,7 +56,36 @@ st.markdown(
     .loss { background: linear-gradient(90deg, #064e8a, #0873b8); border: 1px solid #4cc9f0; }
     .neutral { background: linear-gradient(90deg, #343a46, #4b5563); border: 1px solid #9ca3af; }
     .source-pill { font-size: .78rem; color: #b8bec9; }
-    iframe[title="city_selector"] { display: block; }
+    .city-form { margin: 0 0 1rem 0; }
+    .city-form label {
+        display: block;
+        color: #f5f5f5;
+        font-size: 0.9rem;
+        font-weight: 700;
+        margin: 0 0 0.45rem 0;
+    }
+    .city-form select {
+        width: 100%;
+        min-height: 44px;
+        border-radius: 8px;
+        border: 1px solid #303746;
+        background: #262730;
+        color: #ffffff;
+        font-size: 16px;
+        font-weight: 700;
+        padding: 10px 12px;
+    }
+    .city-form button {
+        margin-top: 0.55rem;
+        border: 1px solid #303746;
+        border-radius: 8px;
+        background: #111827;
+        color: #ffffff;
+        font-size: 0.9rem;
+        font-weight: 700;
+        padding: 0.5rem 0.8rem;
+        cursor: pointer;
+    }
     @media (max-width: 700px) {
         .block-container { padding-left: .85rem; padding-right: .85rem; padding-top: .6rem; }
         h1 { font-size: 1.55rem !important; }
@@ -146,70 +175,20 @@ def sync_selected_city():
 
 def render_city_dropdown(selected_city):
     options_html = "\n".join(
-        f'<option value="{city}" {"selected" if city == selected_city else ""}>{city}</option>'
+        f'<option value="{escape(city)}" {"selected" if city == selected_city else ""}>{escape(city)}</option>'
         for city in CITIES
     )
-    components.html(
+    st.markdown(
         f"""
-        <form id="city-form" method="get" target="_parent" style="margin:0;">
-            <label for="city-select" style="
-                display:block;
-                color:#f5f5f5;
-                font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-                font-size:14px;
-                font-weight:700;
-                margin:0 0 8px 0;
-            ">City</label>
-            <select id="city-select" name="city" style="
-                width:100%;
-                min-height:44px;
-                border-radius:8px;
-                border:1px solid #303746;
-                background:#262730;
-                color:#ffffff;
-                font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-                font-size:16px;
-                font-weight:600;
-                padding:10px 12px;
-            ">
+        <form class="city-form" method="get">
+            <label for="city-select">City</label>
+            <select id="city-select" name="city">
                 {options_html}
             </select>
-            <button id="city-submit" type="submit" style="
-                margin-top:8px;
-                border:1px solid #303746;
-                border-radius:8px;
-                background:#111827;
-                color:#ffffff;
-                font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-                font-size:14px;
-                font-weight:700;
-                padding:8px 12px;
-            ">Apply city</button>
+            <button type="submit">Apply city</button>
         </form>
-        <script>
-        const form = document.getElementById("city-form");
-        const select = document.getElementById("city-select");
-        function selectedCityUrl() {{
-            const parentUrl = document.referrer || window.parent.location.href;
-            const url = new URL(parentUrl);
-            url.searchParams.set("city", select.value);
-            return url.toString();
-        }}
-        form.action = selectedCityUrl();
-        select.addEventListener("change", function() {{
-            form.action = selectedCityUrl();
-            try {{
-                window.open(form.action, "_parent");
-            }} catch (error) {{
-                form.submit();
-            }}
-        }});
-        form.addEventListener("submit", function() {{
-            form.action = selectedCityUrl();
-        }});
-        </script>
         """,
-        height=124,
+        unsafe_allow_html=True,
     )
 
 
