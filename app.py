@@ -55,21 +55,17 @@ st.markdown(
     .loss { background: linear-gradient(90deg, #064e8a, #0873b8); border: 1px solid #4cc9f0; }
     .neutral { background: linear-gradient(90deg, #343a46, #4b5563); border: 1px solid #9ca3af; }
     .source-pill { font-size: .78rem; color: #b8bec9; }
-    div[role="radiogroup"] {
-        background: #151a24;
-        border: 1px solid #303746;
-        border-radius: 10px;
-        padding: 0.75rem 1rem;
-        max-height: 230px;
-        overflow-y: auto;
+    div[data-testid="stBaseButton-pills"] button,
+    div[data-testid="stButton"] button {
+        border-radius: 999px;
     }
     @media (max-width: 700px) {
-        .block-container { padding-left: .85rem; padding-right: .85rem; padding-top: .6rem; }
-        h1 { font-size: 1.55rem !important; }
+        .block-container { padding-left: .75rem; padding-right: .75rem; padding-top: .6rem; max-width: 100%; }
+        h1 { font-size: 1.85rem !important; line-height: 1.05; }
         h2 { font-size: 1.28rem !important; }
-        div[data-testid="column"] { width: 100% !important; flex: 1 1 100% !important; }
         div[data-testid="stMetricValue"] { font-size: 1.9rem; }
-        .stButton button { width: 100%; }
+        .city-meta { font-size: 0.82rem; line-height: 1.45; }
+        .heat-card { padding: 14px 15px; }
     }
     </style>
     """,
@@ -136,6 +132,7 @@ def set_query_city(city):
 
 def choose_city():
     query_city = get_query_city()
+    cities = list(CITIES.keys())
 
     if "selected_city" not in st.session_state:
         st.session_state.selected_city = query_city or "Atlanta"
@@ -147,12 +144,30 @@ def choose_city():
     if st.session_state.selected_city not in CITIES:
         st.session_state.selected_city = "Atlanta"
 
-    selected_city = st.radio(
-        "City",
-        list(CITIES.keys()),
-        key="selected_city",
-        label_visibility="visible",
-    )
+    if hasattr(st, "pills"):
+        selected_city = st.pills(
+            "City",
+            cities,
+            default=st.session_state.selected_city,
+            key="city_picker",
+        )
+        selected_city = selected_city or st.session_state.selected_city
+    elif hasattr(st, "segmented_control"):
+        selected_city = st.segmented_control(
+            "City",
+            cities,
+            default=st.session_state.selected_city,
+            key="city_picker",
+        )
+        selected_city = selected_city or st.session_state.selected_city
+    else:
+        selected_city = st.radio(
+            "City",
+            cities,
+            key="selected_city",
+        )
+
+    st.session_state.selected_city = selected_city
 
     if get_query_city() != selected_city:
         set_query_city(selected_city)
