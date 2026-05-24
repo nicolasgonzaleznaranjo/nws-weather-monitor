@@ -1,6 +1,5 @@
-import math
 import re
-from html.parser import HTMLParser
+from io import StringIO
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 
@@ -8,6 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="NWS Weather Monitor", layout="wide", initial_sidebar_state="collapsed")
 
@@ -16,7 +16,7 @@ NWS_HEADERS = {
     "Accept": "application/geo+json, application/json, text/html",
 }
 
-CITY_CONFIG = {
+CITIES = {
     "Atlanta": {"station": "KATL", "lat": 33.6407, "lon": -84.4277, "tz": "America/New_York", "regime": "humid"},
     "Austin": {"station": "KAUS", "lat": 30.1945, "lon": -97.6699, "tz": "America/Chicago", "regime": "humid"},
     "Boston": {"station": "KBOS", "lat": 42.3656, "lon": -71.0096, "tz": "America/New_York", "regime": "northeast"},
@@ -56,6 +56,7 @@ st.markdown(
     .loss { background: linear-gradient(90deg, #064e8a, #0873b8); border: 1px solid #4cc9f0; }
     .neutral { background: linear-gradient(90deg, #343a46, #4b5563); border: 1px solid #9ca3af; }
     .source-pill { font-size: .78rem; color: #b8bec9; }
+    iframe[title="city_selector"] { display: block; }
     @media (max-width: 700px) {
         .block-container { padding-left: .85rem; padding-right: .85rem; padding-top: .6rem; }
         h1 { font-size: 1.55rem !important; }
@@ -108,6 +109,81 @@ def fmt_hour(dt):
 
 def local_now(tz_name):
     return datetime.now(ZoneInfo(tz_name))
+
+
+def get_query_city():
+    try:
+        city = st.query_params.get("city")
+    except Exception:
+        params = st.experimental_get_query_params()
+        value = params.get("city")
+        city = value[0] if isinstance(value, list) and value else value
+    return city if city in CITIES else None
+
+
+def set_query_city(city):
+    try:
+        st.query_params["city"] = city
+    except Exception:
+        st.experimental_set_query_params(city=city)
+
+
+def sync_selected_city():
+    query_city = get_query_city()
+    if "selected_city" not in st.session_state:
+        st.session_state.selected_city = query_city or "Atlanta"
+    elif query_city and query_city != st.session_state.selected_city:
+        st.session_state.selected_city = query_city
+
+    if st.session_state.selected_city not in CITIES:
+        st.session_state.selected_city = "Atlanta"
+
+    if query_city != st.session_state.selected_city:
+        set_query_city(st.session_state.selected_city)
+
+    return st.session_state.selected_city
+
+
+def render_city_dropdown(selected_city):
+    options_html = "\n".join(
+        f'<option value="{city}" {"selected" if city == selected_city else ""}>{city}</option>'
+        for city in CITIES
+    )
+    components.html(
+        f"""
+        <label for="city-select" style="
+            display:block;
+            color:#f5f5f5;
+            font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+            font-size:14px;
+            font-weight:700;
+            margin:0 0 8px 0;
+        ">City</label>
+        <select id="city-select" style="
+            width:100%;
+            min-height:44px;
+            border-radius:8px;
+            border:1px solid #303746;
+            background:#262730;
+            color:#ffffff;
+            font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+            font-size:16px;
+            font-weight:600;
+            padding:10px 12px;
+        ">
+            {options_html}
+        </select>
+        <script>
+        const select = document.getElementById("city-select");
+        select.addEventListener("change", function() {{
+            const params = new URLSearchParams(window.parent.location.search);
+            params.set("city", select.value);
+            window.parent.location.search = params.toString();
+        }});
+        </script>
+        """,
+        height=82,
+    )
 
 
 def parse_wind_speed(text):
@@ -177,95 +253,19 @@ def fetch_hourly_forecast(lat, lon, tz_name):
     return pd.DataFrame(rows)
 
 
-class _TableParser(HTMLParser):
-    """Very small HTML table parser using only Python standard library."""
-    def __init__(self):
-        super().__init__()
-        self.tables = []
-        self._in_table = False
-        self._in_row = False
-        self._in_cell = False
-        self._current_table = []
-        self._current_row = []
-        self._current_cell = []
-
-    def handle_starttag(self, tag, attrs):
-        tag = tag.lower()
-        if tag == "table":
-            self._in_table = True
-            self._current_table = []
-        elif self._in_table and tag == "tr":
-            self._in_row = True
-            self._current_row = []
-        elif self._in_row and tag in {"td", "th"}:
-            self._in_cell = True
-            self._current_cell = []
-
-    def handle_data(self, data):
-        if self._in_cell:
-            text = data.strip()
-            if text:
-                self._current_cell.append(text)
-
-    def handle_endtag(self, tag):
-        tag = tag.lower()
-        if self._in_cell and tag in {"td", "th"}:
-            cell = " ".join(self._current_cell)
-            cell = re.sub(r"\s+", " ", cell).strip()
-            self._current_row.append(cell)
-            self._in_cell = False
-        elif self._in_row and tag == "tr":
-            if self._current_row:
-                self._current_table.append(self._current_row)
-            self._in_row = False
-        elif self._in_table and tag == "table":
-            if self._current_table:
-                self.tables.append(self._current_table)
-            self._in_table = False
-
-
 def _parse_obhistory_html(html_text):
-    parser = _TableParser()
-    parser.feed(html_text)
-
-    selected = None
-    for table in parser.tables:
-        joined = " ".join(" ".join(row) for row in table[:4]).lower()
-        if "date/time" in joined and "temp" in joined and "dew" in joined:
-            selected = table
-            break
-
-    if not selected:
-        return pd.DataFrame()
-
-    # Usually the first row is the header. Some NWS pages may have multiple header rows;
-    # find the row that contains Date/Time and Temp.
-    header_idx = 0
-    for i, row in enumerate(selected[:5]):
-        j = " ".join(row).lower()
-        if "date/time" in j and "temp" in j:
-            header_idx = i
-            break
-
-    headers = selected[header_idx]
-    data_rows = selected[header_idx + 1:]
-
-    # Normalize uneven rows without crashing.
-    width = len(headers)
-    normalized = []
-    for row in data_rows:
-        if len(row) < 2:
-            continue
-        if len(row) < width:
-            row = row + [None] * (width - len(row))
-        elif len(row) > width:
-            row = row[:width]
-        normalized.append(row)
-
-    if not normalized:
-        return pd.DataFrame()
-
-    return pd.DataFrame(normalized, columns=headers)
+    tables = pd.read_html(StringIO(html_text))
+    for table in tables:
+        table.columns = [
+            " ".join(str(part).strip() for part in col if str(part).strip() and not str(part).startswith("Unnamed"))
+            if isinstance(col, tuple)
+            else str(col).strip()
+            for col in table.columns
+        ]
+        joined = " ".join(table.columns).lower()
+        if "date/time" in joined and "temp" in joined:
+            return table
+    return pd.DataFrame()
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -274,7 +274,11 @@ def fetch_obhistory(station, tz_name):
     response = requests.get(url, headers={"User-Agent": NWS_HEADERS["User-Agent"]}, timeout=25)
     response.raise_for_status()
 
-    df = _parse_obhistory_html(response.text)
+    try:
+        df = _parse_obhistory_html(response.text)
+    except Exception:
+        return pd.DataFrame()
+
     if df.empty:
         return pd.DataFrame()
 
@@ -299,7 +303,7 @@ def fetch_obhistory(station, tz_name):
     weather_col = find_col([["weather"]])
 
     tz = ZoneInfo(tz_name)
-    now = local_now(tz)
+    now = local_now(tz_name)
     rows = []
 
     for _, r in df.iterrows():
@@ -475,7 +479,7 @@ def confidence_for_event(event_dt, event_type, row, city_regime):
 
 def build_timeline(obs_df, fc_df, tz_name):
     tz = ZoneInfo(tz_name)
-    now = local_now(tz)
+    now = local_now(tz_name)
     start = datetime.combine(now.date(), time.min, tzinfo=tz)
     end = datetime.combine(now.date() + timedelta(days=1), time(23, 59), tzinfo=tz)
 
@@ -545,9 +549,9 @@ def plot_temperature(timeline, today_hi, today_lo, tomorrow_hi, tomorrow_lo):
 st.title("NWS Weather Monitor")
 st.caption("Fast monitor using official NWS station forecast + live station observation history.")
 
-cities = list(CITY_CONFIG.keys())
-selected_city = st.selectbox("City", cities, index=0, key="city_select")
-config = CITY_CONFIG[selected_city]
+selected_city = sync_selected_city()
+render_city_dropdown(selected_city)
+city_cfg = CITIES[selected_city]
 
 col_refresh, col_meta = st.columns([1, 4])
 with col_refresh:
@@ -555,8 +559,8 @@ with col_refresh:
         st.cache_data.clear()
         st.rerun()
 
-station = config["station"]
-tz_name = config["tz"]
+station = city_cfg["station"]
+tz_name = city_cfg["tz"]
 now = local_now(tz_name)
 with col_meta:
     st.markdown(
@@ -565,15 +569,15 @@ with col_meta:
     )
 
 try:
-    forecast_df = fetch_hourly_forecast(config["lat"], config["lon"], tz_name)
+    forecast_df = fetch_hourly_forecast(city_cfg["lat"], city_cfg["lon"], tz_name)
 except Exception as e:
-    st.error(f"Forecast failed for {selected_city} / {station}: {e}")
+    st.error(f"Forecast data is unavailable for {selected_city} / {station}.")
     forecast_df = pd.DataFrame()
 
 try:
     observed_df = fetch_obhistory(station, tz_name)
-except Exception as e:
-    st.warning(f"Observed history failed for {selected_city} / {station}: {e}")
+except Exception:
+    st.warning(f"Observed station history is unavailable for {selected_city} / {station}.")
     observed_df = pd.DataFrame()
 
 timeline = build_timeline(observed_df, forecast_df, tz_name)
@@ -591,14 +595,14 @@ for col, title, row, event_type in [
 ]:
     with col:
         if row:
-            conf = confidence_for_event(row["datetime"], event_type, row, config["regime"])
+            conf = confidence_for_event(row["datetime"], event_type, row, city_cfg["regime"])
             st.metric(title, fmt_temp(row["temp"]), f"{fmt_hour(row['datetime'])} · {conf}% · {row['source']}")
         else:
             st.metric(title, "N/A", "")
 
 # Heat card based on today low row if available, otherwise latest observed/forecast row
 base_row = today_lo or (timeline.iloc[-1].to_dict() if not timeline.empty else None)
-label, score, cls, reasons = score_heat_regime(base_row, config["regime"])
+label, score, cls, reasons = score_heat_regime(base_row, city_cfg["regime"])
 st.markdown(
     f'<div class="heat-card {cls}">{label}<small>Score {score} · {reasons}</small></div>',
     unsafe_allow_html=True,
@@ -612,7 +616,7 @@ with st.expander("Tomorrow projected temperatures", expanded=False):
     ]:
         with col:
             if row:
-                conf = confidence_for_event(row["datetime"], event_type, row, config["regime"])
+                conf = confidence_for_event(row["datetime"], event_type, row, city_cfg["regime"])
                 st.metric(title, fmt_temp(row["temp"]), f"{fmt_hour(row['datetime'])} · {conf}% · {row['source']}")
             else:
                 st.metric(title, "N/A", "")
@@ -645,9 +649,3 @@ if not timeline.empty:
         "Sky Cover %", "Precip %", "Humidity %", "Rain", "Thunder", "Description"
     ]
     st.dataframe(display, use_container_width=True, hide_index=True, height=420)
-
-with st.expander("Debug: raw observed rows"):
-    if observed_df.empty:
-        st.write("No observed rows parsed.")
-    else:
-        st.dataframe(observed_df, use_container_width=True, hide_index=True)

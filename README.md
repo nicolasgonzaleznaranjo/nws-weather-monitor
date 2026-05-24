@@ -25,7 +25,7 @@ Inside that folder are four files:
 
 ```text
 nws-weather-monitor/
-|-- streamlit_app.py
+|-- app.py
 |-- requirements.txt
 |-- runtime.txt
 `-- README.md
@@ -33,7 +33,7 @@ nws-weather-monitor/
 
 ## What Each File Does
 
-### `streamlit_app.py`
+### `app.py`
 
 This is the actual app.
 
@@ -45,7 +45,7 @@ It does these things:
 - builds the 48-hour table
 - shows today and tomorrow high and low temperatures
 - estimates a simple confidence percentage
-- gives you a slider to inspect any hour
+- shows a temperature chart and observed plus forecast table
 - refreshes automatically every 60 minutes
 
 ### `requirements.txt`
@@ -57,6 +57,8 @@ The app needs:
 - `streamlit` for the website
 - `pandas` for tables
 - `requests` for calling the National Weather Service
+- `plotly` for the temperature chart
+- `lxml` so pandas can read the NWS observation-history table
 
 ### `runtime.txt`
 
@@ -146,7 +148,7 @@ Inside your new GitHub repository:
 2. Drag these four files into GitHub:
 
 ```text
-streamlit_app.py
+app.py
 requirements.txt
 runtime.txt
 README.md
@@ -193,7 +195,7 @@ main
 4. For **Main file path**, type:
 
 ```text
-streamlit_app.py
+app.py
 ```
 
 5. Click **Deploy**.
@@ -201,7 +203,7 @@ streamlit_app.py
 Important: if you uploaded the whole `nws-weather-monitor` folder into GitHub instead of uploading the four files directly, then the main file path should be:
 
 ```text
-nws-weather-monitor/streamlit_app.py
+nws-weather-monitor/app.py
 ```
 
 Streamlit will install the packages from `requirements.txt` and run the app.
@@ -215,7 +217,7 @@ Check these things:
 1. Make sure your GitHub repository contains:
 
 ```text
-streamlit_app.py
+app.py
 requirements.txt
 runtime.txt
 README.md
@@ -224,13 +226,13 @@ README.md
 2. Make sure **Main file path** is exactly:
 
 ```text
-streamlit_app.py
+app.py
 ```
 
 3. If your files are inside a folder named `nws-weather-monitor`, use this instead:
 
 ```text
-nws-weather-monitor/streamlit_app.py
+nws-weather-monitor/app.py
 ```
 
 4. In Streamlit Cloud, click **Manage app**.
@@ -241,7 +243,7 @@ nws-weather-monitor/streamlit_app.py
 
 ### City dropdown
 
-Use the city dropdown on the left side.
+Use the city dropdown near the top of the page.
 
 Pick the city you want to monitor.
 
@@ -251,11 +253,9 @@ Click **Refresh now** if you want the newest National Weather Service data immed
 
 The app also refreshes itself every 60 minutes.
 
-### 48-hour slider
+### Temperature chart and table
 
-Move the slider under **Hourly Timeline**.
-
-When you move it, the selected hour details update below the table.
+After you choose a city, the chart and table update for that city's station.
 
 ## What Text To Paste
 
@@ -268,7 +268,7 @@ First version of NWS Weather Monitor
 When Streamlit asks for the main file path, paste:
 
 ```text
-streamlit_app.py
+app.py
 ```
 
 ## How To Update The App Later
