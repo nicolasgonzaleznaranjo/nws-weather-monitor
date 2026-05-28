@@ -1,6 +1,5 @@
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from html import escape
 from io import StringIO
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
@@ -948,43 +947,26 @@ def render_all_cities():
                     }
         rows = [results[city_name] for city_name in CITIES]
     df = pd.DataFrame(rows)
-    table_style = "width:100%; border-collapse:collapse; font-size:0.95rem; text-align:center;"
-    th = "border:1px solid #303746; padding:4px; text-align:center;"
-    td = "border:1px solid #303746; padding:3px; text-align:center;"
-    html = [
-        f'<table style="{table_style}">',
-        "<thead>",
-        "<tr>",
-        f'<th style="{th}"></th>',
-        f'<th colspan="2" style="{th} text-align:center;">Today</th>',
-        f'<th colspan="2" style="{th} text-align:center;">Tomorrow</th>',
-        "</tr>",
-        "<tr>",
-        f'<th style="{th}">City</th>',
-        f'<th style="{th}">Max Temp</th>',
-        f'<th style="{th}">Min Tem</th>',
-        f'<th style="{th}">Max Temp</th>',
-        f'<th style="{th}">Min Tem</th>',
-        "</tr>",
-        "</thead>",
-        "<tbody>",
-    ]
-    for _, row in df.iterrows():
-        today_max = "" if pd.isna(row["Max Temp"]) else row["Max Temp"]
-        today_min = "" if pd.isna(row["Min Tem"]) else row["Min Tem"]
-        tomorrow_max = "" if pd.isna(row["Max Temp "]) else row["Max Temp "]
-        tomorrow_min = "" if pd.isna(row["Min Tem "]) else row["Min Tem "]
-        html.extend([
-            "<tr>",
-            f'<td style="{td} font-weight:700;">{escape(str(row["City"]))}</td>',
-            f'<td style="{td} font-weight:700;">{today_max}</td>',
-            f'<td style="{td} font-weight:700;">{today_min}</td>',
-            f'<td style="{td} font-weight:700;">{tomorrow_max}</td>',
-            f'<td style="{td} font-weight:700;">{tomorrow_min}</td>',
-            "</tr>",
-        ])
-    html.extend(["</tbody>", "</table>"])
-    st.markdown("".join(html), unsafe_allow_html=True)
+    df = df.rename(columns={
+        "Max Temp": "Today Max",
+        "Min Tem": "Today Min",
+        "Max Temp ": "Tomorrow Max",
+        "Min Tem ": "Tomorrow Min",
+    })
+    height = 38 + (len(df) + 1) * 35
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        height=height,
+        column_config={
+            "City": st.column_config.TextColumn("City", width="medium"),
+            "Today Max": st.column_config.NumberColumn("Today Max", format="%d", width="small"),
+            "Today Min": st.column_config.NumberColumn("Today Min", format="%d", width="small"),
+            "Tomorrow Max": st.column_config.NumberColumn("Tomorrow Max", format="%d", width="small"),
+            "Tomorrow Min": st.column_config.NumberColumn("Tomorrow Min", format="%d", width="small"),
+        },
+    )
 
 
 def render_links():
@@ -993,34 +975,32 @@ def render_links():
     today = now.date()
     tomorrow = today + timedelta(days=1)
     df = kalshi_links_table(today, tomorrow)
-    table_style = "width:100%; border-collapse:collapse; font-size:0.95rem; text-align:center;"
-    th = "border:1px solid #303746; padding:4px; text-align:center;"
-    td = "border:1px solid #303746; padding:3px; text-align:center;"
-    html = [
-        f'<table style="{table_style}">',
-        "<thead>",
-        "<tr>",
-        f'<th style="{th}">City</th>',
-        f'<th style="{th}">Low Today</th>',
-        f'<th style="{th}">High Today</th>',
-        f'<th style="{th}">Low Tomorrow</th>',
-        f'<th style="{th}">High Tomorrow</th>',
-        "</tr>",
-        "</thead>",
-        "<tbody>",
-    ]
-    for _, row in df.iterrows():
-        html.extend([
-            "<tr>",
-            f'<td style="{td}">{escape(str(row["City"]))}</td>',
-            f'<td style="{td}"><a href="{escape(row["_Low Today URL"])}" target="_blank">{escape(row["Low Today"])}</a></td>',
-            f'<td style="{td}"><a href="{escape(row["_High Today URL"])}" target="_blank">{escape(row["High Today"])}</a></td>',
-            f'<td style="{td}"><a href="{escape(row["_Low Tomorrow URL"])}" target="_blank">{escape(row["Low Tomorrow"])}</a></td>',
-            f'<td style="{td}"><a href="{escape(row["_High Tomorrow URL"])}" target="_blank">{escape(row["High Tomorrow"])}</a></td>',
-            "</tr>",
-        ])
-    html.extend(["</tbody>", "</table>"])
-    st.markdown("".join(html), unsafe_allow_html=True)
+    display_df = df[[
+        "City",
+        "_Low Today URL",
+        "_High Today URL",
+        "_Low Tomorrow URL",
+        "_High Tomorrow URL",
+    ]].rename(columns={
+        "_Low Today URL": "Low Today",
+        "_High Today URL": "High Today",
+        "_Low Tomorrow URL": "Low Tomorrow",
+        "_High Tomorrow URL": "High Tomorrow",
+    })
+    height = 38 + (len(display_df) + 1) * 35
+    st.dataframe(
+        display_df,
+        use_container_width=True,
+        hide_index=True,
+        height=height,
+        column_config={
+            "City": st.column_config.TextColumn("City", width="medium"),
+            "Low Today": st.column_config.LinkColumn("Low Today", width="medium", display_text="Low Today"),
+            "High Today": st.column_config.LinkColumn("High Today", width="medium", display_text="High Today"),
+            "Low Tomorrow": st.column_config.LinkColumn("Low Tomorrow", width="medium", display_text="Low Tomorrow"),
+            "High Tomorrow": st.column_config.LinkColumn("High Tomorrow", width="medium", display_text="High Tomorrow"),
+        },
+    )
 
 
 def plot_temperature(timeline, today_hi, today_lo, tomorrow_hi, tomorrow_lo):
