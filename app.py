@@ -929,7 +929,7 @@ def kalshi_links_table(today, tomorrow):
 
 
 def render_all_cities():
-    st.subheader("All cities")
+    st.markdown('<h2 style="text-align:center;">All cities</h2>', unsafe_allow_html=True)
     with st.spinner("Loading all cities from NWS..."):
         results = {}
         with ThreadPoolExecutor(max_workers=8) as executor:
@@ -948,9 +948,9 @@ def render_all_cities():
                     }
         rows = [results[city_name] for city_name in CITIES]
     df = pd.DataFrame(rows)
-    table_style = "width:100%; border-collapse:collapse; font-size:0.95rem;"
-    th = "border:1px solid #303746; padding:4px;"
-    td = "border:1px solid #303746; padding:3px;"
+    table_style = "width:100%; border-collapse:collapse; font-size:0.95rem; text-align:center;"
+    th = "border:1px solid #303746; padding:4px; text-align:center;"
+    td = "border:1px solid #303746; padding:3px; text-align:center;"
     html = [
         f'<table style="{table_style}">',
         "<thead>",
@@ -977,10 +977,10 @@ def render_all_cities():
         html.extend([
             "<tr>",
             f'<td style="{td} font-weight:700;">{escape(str(row["City"]))}</td>',
-            f'<td style="{td} text-align:right; font-weight:700;">{today_max}</td>',
-            f'<td style="{td} text-align:right; font-weight:700;">{today_min}</td>',
-            f'<td style="{td} text-align:right; font-weight:700;">{tomorrow_max}</td>',
-            f'<td style="{td} text-align:right; font-weight:700;">{tomorrow_min}</td>',
+            f'<td style="{td} font-weight:700;">{today_max}</td>',
+            f'<td style="{td} font-weight:700;">{today_min}</td>',
+            f'<td style="{td} font-weight:700;">{tomorrow_max}</td>',
+            f'<td style="{td} font-weight:700;">{tomorrow_min}</td>',
             "</tr>",
         ])
     html.extend(["</tbody>", "</table>"])
@@ -988,14 +988,14 @@ def render_all_cities():
 
 
 def render_links():
-    st.subheader("Links")
+    st.markdown('<h2 style="text-align:center;">Links</h2>', unsafe_allow_html=True)
     now = local_now("America/New_York")
     today = now.date()
     tomorrow = today + timedelta(days=1)
     df = kalshi_links_table(today, tomorrow)
-    table_style = "width:100%; border-collapse:collapse; font-size:0.95rem;"
-    th = "border:1px solid #303746; padding:4px;"
-    td = "border:1px solid #303746; padding:3px;"
+    table_style = "width:100%; border-collapse:collapse; font-size:0.95rem; text-align:center;"
+    th = "border:1px solid #303746; padding:4px; text-align:center;"
+    td = "border:1px solid #303746; padding:3px; text-align:center;"
     html = [
         f'<table style="{table_style}">',
         "<thead>",
