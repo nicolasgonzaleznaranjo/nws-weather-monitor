@@ -1,4 +1,6 @@
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from html import escape
 from io import StringIO
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
@@ -429,6 +431,71 @@ def fetch_hourly_forecast(station, tz_name):
         return fetch_api_hourly_forecast(station, tz_name)
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_daily_forecast(station, tz_name):
+    urls = fetch_point_urls_for_station(station)
+    response = requests.get(urls["forecast"], headers=NWS_HEADERS, timeout=30)
+    response.raise_for_status()
+    periods = response.json()["properties"]["periods"]
+    tz = ZoneInfo(tz_name)
+    rows = []
+
+    for p in periods:
+        start_dt = datetime.fromisoformat(p["startTime"].replace("Z", "+00:00")).astimezone(tz)
+        rows.append({
+            "datetime": start_dt,
+            "date": start_dt.date(),
+            "name": p.get("name", ""),
+            "source": "FORECAST",
+            "temp": safe_float(p.get("temperature")),
+            "is_daytime": bool(p.get("isDaytime")),
+            "wind_mph": parse_wind_speed(p.get("windSpeed")),
+            "wind_dir": p.get("windDirection", "-"),
+            "description": p.get("shortForecast") or p.get("detailedForecast") or "",
+        })
+    return pd.DataFrame(rows)
+
+
+def daily_high_for_date(daily_df, target_date):
+    if daily_df.empty:
+        return None
+    rows = daily_df[
+        (daily_df["date"] == target_date)
+        & (daily_df["is_daytime"] == True)
+        & daily_df["temp"].notna()
+    ].copy()
+    if rows.empty:
+        return None
+    return rows.iloc[0].to_dict()
+
+
+def official_projected_high(obs_df, hourly_df, daily_df, target_date, tz_name):
+    hourly_hi, _ = projected_extremes_for_date(obs_df, hourly_df, target_date, tz_name)
+    daily_hi = daily_high_for_date(daily_df, target_date)
+    if daily_hi is None:
+        return hourly_hi
+
+    now = local_now(tz_name)
+    if target_date == now.date() and not obs_df.empty:
+        observed_today = obs_df[
+            (obs_df["date"] == target_date)
+            & obs_df["temp"].notna()
+            & (obs_df["datetime"] <= now)
+        ].copy()
+        if not observed_today.empty:
+            observed_hi = observed_today.loc[observed_today["temp"].idxmax()].to_dict()
+            if safe_float(observed_hi.get("temp")) is not None and safe_float(observed_hi.get("temp")) >= safe_float(daily_hi.get("temp")):
+                return observed_hi
+
+    if hourly_hi is None:
+        return daily_hi
+    if safe_float(daily_hi.get("temp")) is None:
+        return hourly_hi
+    if safe_float(hourly_hi.get("temp")) is None:
+        return daily_hi
+    return daily_hi if safe_float(daily_hi["temp"]) >= safe_float(hourly_hi["temp"]) else hourly_hi
+
+
 def _parse_obhistory_html(html_text):
     tables = pd.read_html(StringIO(html_text))
     for table in tables:
@@ -823,14 +890,17 @@ def summary_row_for_city(city_name):
     tomorrow = today + timedelta(days=1)
 
     forecast_df = fetch_hourly_forecast(cfg["station"], tz_name)
+    daily_df = fetch_daily_forecast(cfg["station"], tz_name)
     today_rows = forecast_df[forecast_df["date"] == today].dropna(subset=["temp"])
     tomorrow_rows = forecast_df[forecast_df["date"] == tomorrow].dropna(subset=["temp"])
+    today_daily_high = daily_high_for_date(daily_df, today)
+    tomorrow_daily_high = daily_high_for_date(daily_df, tomorrow)
 
     return {
         "City": display_city(city_name),
-        "Max Temp": safe_int(today_rows["temp"].max()) if not today_rows.empty else None,
+        "Max Temp": safe_int(today_daily_high["temp"]) if today_daily_high else (safe_int(today_rows["temp"].max()) if not today_rows.empty else None),
         "Min Tem": safe_int(today_rows["temp"].min()) if not today_rows.empty else None,
-        "Max Temp ": safe_int(tomorrow_rows["temp"].max()) if not tomorrow_rows.empty else None,
+        "Max Temp ": safe_int(tomorrow_daily_high["temp"]) if tomorrow_daily_high else (safe_int(tomorrow_rows["temp"].max()) if not tomorrow_rows.empty else None),
         "Min Tem ": safe_int(tomorrow_rows["temp"].min()) if not tomorrow_rows.empty else None,
     }
 
@@ -861,49 +931,60 @@ def kalshi_links_table(today, tomorrow):
 def render_all_cities():
     st.subheader("All cities")
     with st.spinner("Loading all cities from NWS..."):
-        rows = []
-        for city_name in CITIES:
-            try:
-                rows.append(summary_row_for_city(city_name))
-            except Exception:
-                rows.append({
-                    "City": display_city(city_name),
-                    "Max Temp": None,
-                    "Min Tem": None,
-                    "Max Temp ": None,
-                    "Min Tem ": None,
-                })
+        results = {}
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            future_to_city = {executor.submit(summary_row_for_city, city_name): city_name for city_name in CITIES}
+            for future in as_completed(future_to_city):
+                city_name = future_to_city[future]
+                try:
+                    results[city_name] = future.result()
+                except Exception:
+                    results[city_name] = {
+                        "City": display_city(city_name),
+                        "Max Temp": None,
+                        "Min Tem": None,
+                        "Max Temp ": None,
+                        "Min Tem ": None,
+                    }
+        rows = [results[city_name] for city_name in CITIES]
     df = pd.DataFrame(rows)
-    html = """
-    <table style="width:100%; border-collapse:collapse; font-size:0.95rem;">
-        <thead>
-            <tr>
-                <th style="border:1px solid #303746; padding:4px;"></th>
-                <th colspan="2" style="border:1px solid #303746; padding:4px; text-align:center;">Today</th>
-                <th colspan="2" style="border:1px solid #303746; padding:4px; text-align:center;">Tomorrow</th>
-            </tr>
-            <tr>
-                <th style="border:1px solid #303746; padding:4px;">City</th>
-                <th style="border:1px solid #303746; padding:4px;">Max Temp</th>
-                <th style="border:1px solid #303746; padding:4px;">Min Tem</th>
-                <th style="border:1px solid #303746; padding:4px;">Max Temp</th>
-                <th style="border:1px solid #303746; padding:4px;">Min Tem</th>
-            </tr>
-        </thead>
-        <tbody>
-    """
+    table_style = "width:100%; border-collapse:collapse; font-size:0.95rem;"
+    th = "border:1px solid #303746; padding:4px;"
+    td = "border:1px solid #303746; padding:3px;"
+    html = [
+        f'<table style="{table_style}">',
+        "<thead>",
+        "<tr>",
+        f'<th style="{th}"></th>',
+        f'<th colspan="2" style="{th} text-align:center;">Today</th>',
+        f'<th colspan="2" style="{th} text-align:center;">Tomorrow</th>',
+        "</tr>",
+        "<tr>",
+        f'<th style="{th}">City</th>',
+        f'<th style="{th}">Max Temp</th>',
+        f'<th style="{th}">Min Tem</th>',
+        f'<th style="{th}">Max Temp</th>',
+        f'<th style="{th}">Min Tem</th>',
+        "</tr>",
+        "</thead>",
+        "<tbody>",
+    ]
     for _, row in df.iterrows():
-        html += f"""
-            <tr>
-                <td style="border:1px solid #303746; padding:3px; font-weight:700;">{row['City']}</td>
-                <td style="border:1px solid #303746; padding:3px; text-align:right; font-weight:700;">{'' if pd.isna(row['Max Temp']) else row['Max Temp']}</td>
-                <td style="border:1px solid #303746; padding:3px; text-align:right; font-weight:700;">{'' if pd.isna(row['Min Tem']) else row['Min Tem']}</td>
-                <td style="border:1px solid #303746; padding:3px; text-align:right; font-weight:700;">{'' if pd.isna(row['Max Temp ']) else row['Max Temp ']}</td>
-                <td style="border:1px solid #303746; padding:3px; text-align:right; font-weight:700;">{'' if pd.isna(row['Min Tem ']) else row['Min Tem ']}</td>
-            </tr>
-        """
-    html += "</tbody></table>"
-    st.markdown(html, unsafe_allow_html=True)
+        today_max = "" if pd.isna(row["Max Temp"]) else row["Max Temp"]
+        today_min = "" if pd.isna(row["Min Tem"]) else row["Min Tem"]
+        tomorrow_max = "" if pd.isna(row["Max Temp "]) else row["Max Temp "]
+        tomorrow_min = "" if pd.isna(row["Min Tem "]) else row["Min Tem "]
+        html.extend([
+            "<tr>",
+            f'<td style="{td} font-weight:700;">{escape(str(row["City"]))}</td>',
+            f'<td style="{td} text-align:right; font-weight:700;">{today_max}</td>',
+            f'<td style="{td} text-align:right; font-weight:700;">{today_min}</td>',
+            f'<td style="{td} text-align:right; font-weight:700;">{tomorrow_max}</td>',
+            f'<td style="{td} text-align:right; font-weight:700;">{tomorrow_min}</td>',
+            "</tr>",
+        ])
+    html.extend(["</tbody>", "</table>"])
+    st.markdown("".join(html), unsafe_allow_html=True)
 
 
 def render_links():
@@ -912,31 +993,34 @@ def render_links():
     today = now.date()
     tomorrow = today + timedelta(days=1)
     df = kalshi_links_table(today, tomorrow)
-    html = """
-    <table style="width:100%; border-collapse:collapse; font-size:0.95rem;">
-        <thead>
-            <tr>
-                <th style="border:1px solid #303746; padding:4px;">City</th>
-                <th style="border:1px solid #303746; padding:4px;">Low Today</th>
-                <th style="border:1px solid #303746; padding:4px;">High Today</th>
-                <th style="border:1px solid #303746; padding:4px;">Low Tomorrow</th>
-                <th style="border:1px solid #303746; padding:4px;">High Tomorrow</th>
-            </tr>
-        </thead>
-        <tbody>
-    """
+    table_style = "width:100%; border-collapse:collapse; font-size:0.95rem;"
+    th = "border:1px solid #303746; padding:4px;"
+    td = "border:1px solid #303746; padding:3px;"
+    html = [
+        f'<table style="{table_style}">',
+        "<thead>",
+        "<tr>",
+        f'<th style="{th}">City</th>',
+        f'<th style="{th}">Low Today</th>',
+        f'<th style="{th}">High Today</th>',
+        f'<th style="{th}">Low Tomorrow</th>',
+        f'<th style="{th}">High Tomorrow</th>',
+        "</tr>",
+        "</thead>",
+        "<tbody>",
+    ]
     for _, row in df.iterrows():
-        html += f"""
-            <tr>
-                <td style="border:1px solid #303746; padding:3px;">{row['City']}</td>
-                <td style="border:1px solid #303746; padding:3px;"><a href="{row['_Low Today URL']}" target="_blank">{row['Low Today']}</a></td>
-                <td style="border:1px solid #303746; padding:3px;"><a href="{row['_High Today URL']}" target="_blank">{row['High Today']}</a></td>
-                <td style="border:1px solid #303746; padding:3px;"><a href="{row['_Low Tomorrow URL']}" target="_blank">{row['Low Tomorrow']}</a></td>
-                <td style="border:1px solid #303746; padding:3px;"><a href="{row['_High Tomorrow URL']}" target="_blank">{row['High Tomorrow']}</a></td>
-            </tr>
-        """
-    html += "</tbody></table>"
-    st.markdown(html, unsafe_allow_html=True)
+        html.extend([
+            "<tr>",
+            f'<td style="{td}">{escape(str(row["City"]))}</td>',
+            f'<td style="{td}"><a href="{escape(row["_Low Today URL"])}" target="_blank">{escape(row["Low Today"])}</a></td>',
+            f'<td style="{td}"><a href="{escape(row["_High Today URL"])}" target="_blank">{escape(row["High Today"])}</a></td>',
+            f'<td style="{td}"><a href="{escape(row["_Low Tomorrow URL"])}" target="_blank">{escape(row["Low Tomorrow"])}</a></td>',
+            f'<td style="{td}"><a href="{escape(row["_High Tomorrow URL"])}" target="_blank">{escape(row["High Tomorrow"])}</a></td>',
+            "</tr>",
+        ])
+    html.extend(["</tbody>", "</table>"])
+    st.markdown("".join(html), unsafe_allow_html=True)
 
 
 def plot_temperature(timeline, today_hi, today_lo, tomorrow_hi, tomorrow_lo):
@@ -1016,6 +1100,11 @@ except Exception as e:
     forecast_df = pd.DataFrame()
 
 try:
+    daily_df = fetch_daily_forecast(station, tz_name)
+except Exception:
+    daily_df = pd.DataFrame()
+
+try:
     observed_df = fetch_obhistory(station, tz_name)
 except Exception:
     st.warning(f"Observed station history is unavailable for {selected_city} / {station}.")
@@ -1026,6 +1115,8 @@ today = now.date()
 tomorrow = today + timedelta(days=1)
 today_hi, today_lo = projected_extremes_for_date(observed_df, forecast_df, today, tz_name)
 tomorrow_hi, tomorrow_lo = projected_extremes_for_date(observed_df, forecast_df, tomorrow, tz_name)
+today_hi = official_projected_high(observed_df, forecast_df, daily_df, today, tz_name)
+tomorrow_hi = official_projected_high(observed_df, forecast_df, daily_df, tomorrow, tz_name)
 
 st.subheader("Today projected temperatures")
 
