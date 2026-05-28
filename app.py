@@ -38,6 +38,8 @@ CITIES = {
     "Washington DC": {"station": "KDCA", "lat": 38.8512, "lon": -77.0402, "tz": "America/New_York", "regime": "northeast"},
 }
 
+NAV_OPTIONS = ["All cities", "Links"] + list(CITIES.keys())
+
 # -----------------------------
 # Styling
 # -----------------------------
@@ -130,50 +132,56 @@ def set_query_city(city):
         st.experimental_set_query_params(city=city)
 
 
-def choose_city():
+def choose_view():
     query_city = get_query_city()
-    cities = list(CITIES.keys())
 
+    if "selected_view" not in st.session_state:
+        st.session_state.selected_view = query_city or "Atlanta"
     if "selected_city" not in st.session_state:
         st.session_state.selected_city = query_city or "Atlanta"
 
     last_synced_city = st.session_state.get("_last_synced_city")
     if query_city and query_city != last_synced_city and query_city != st.session_state.selected_city:
         st.session_state.selected_city = query_city
+        st.session_state.selected_view = query_city
 
     if st.session_state.selected_city not in CITIES:
         st.session_state.selected_city = "Atlanta"
+    if st.session_state.selected_view not in NAV_OPTIONS:
+        st.session_state.selected_view = st.session_state.selected_city
 
     if hasattr(st, "pills"):
-        selected_city = st.pills(
+        selected_view = st.pills(
             "City",
-            cities,
-            default=st.session_state.selected_city,
-            key="city_picker",
+            NAV_OPTIONS,
+            default=st.session_state.selected_view,
+            key="view_picker",
         )
-        selected_city = selected_city or st.session_state.selected_city
+        selected_view = selected_view or st.session_state.selected_view
     elif hasattr(st, "segmented_control"):
-        selected_city = st.segmented_control(
+        selected_view = st.segmented_control(
             "City",
-            cities,
-            default=st.session_state.selected_city,
-            key="city_picker",
+            NAV_OPTIONS,
+            default=st.session_state.selected_view,
+            key="view_picker",
         )
-        selected_city = selected_city or st.session_state.selected_city
+        selected_view = selected_view or st.session_state.selected_view
     else:
-        selected_city = st.radio(
+        selected_view = st.radio(
             "City",
-            cities,
-            key="selected_city",
+            NAV_OPTIONS,
+            key="selected_view",
         )
 
-    st.session_state.selected_city = selected_city
+    st.session_state.selected_view = selected_view
 
-    if get_query_city() != selected_city:
-        set_query_city(selected_city)
+    if selected_view in CITIES:
+        st.session_state.selected_city = selected_view
+        if get_query_city() != selected_view:
+            set_query_city(selected_view)
+        st.session_state._last_synced_city = selected_view
 
-    st.session_state._last_synced_city = selected_city
-    return selected_city
+    return selected_view
 
 
 def parse_wind_speed(text):
@@ -253,6 +261,36 @@ def fetch_hourly_forecast(lat, lon, tz_name):
             "thunder": "Yes" if "thunder" in desc.lower() or "storm" in desc.lower() else "-",
             "description": desc,
         })
+    return pd.DataFrame(rows)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_daily_forecast(lat, lon, tz_name):
+    points_url = f"https://api.weather.gov/points/{lat},{lon}"
+    points = requests.get(points_url, headers=NWS_HEADERS, timeout=20)
+    points.raise_for_status()
+    daily_url = points.json()["properties"]["forecast"]
+
+    response = requests.get(daily_url, headers=NWS_HEADERS, timeout=30)
+    response.raise_for_status()
+    periods = response.json()["properties"]["periods"]
+    tz = ZoneInfo(tz_name)
+    rows = []
+
+    for p in periods:
+        start_dt = datetime.fromisoformat(p["startTime"].replace("Z", "+00:00")).astimezone(tz)
+        rows.append({
+            "datetime": start_dt,
+            "date": start_dt.date(),
+            "name": p.get("name", ""),
+            "source": "FORECAST",
+            "temp": safe_float(p.get("temperature")),
+            "is_daytime": bool(p.get("isDaytime")),
+            "wind_mph": parse_wind_speed(p.get("windSpeed")),
+            "wind_dir": p.get("windDirection", "-"),
+            "description": p.get("shortForecast") or p.get("detailedForecast") or "",
+        })
+
     return pd.DataFrame(rows)
 
 
@@ -642,6 +680,125 @@ def projected_extremes_for_date(obs_df, fc_df, target_date, tz_name):
     return hi_row, lo_row
 
 
+def daily_high_for_date(daily_df, target_date):
+    if daily_df.empty:
+        return None
+
+    day_rows = daily_df[
+        (daily_df["date"] == target_date) & (daily_df["is_daytime"] == True)
+    ].copy()
+    day_rows = day_rows.dropna(subset=["temp"])
+    if day_rows.empty:
+        return None
+
+    row = day_rows.iloc[0].to_dict()
+    return {
+        "datetime": row["datetime"],
+        "date": row["date"],
+        "hour": row["datetime"].hour,
+        "time": row["datetime"].strftime("%a %-I %p"),
+        "source": "FORECAST",
+        "temp": row["temp"],
+        "dewpoint": None,
+        "heat_index": row["temp"],
+        "wind_mph": row.get("wind_mph"),
+        "wind_dir": row.get("wind_dir", "-"),
+        "gust_mph": None,
+        "sky_cover": None,
+        "precip": None,
+        "humidity": None,
+        "rain": "Yes" if "rain" in str(row.get("description", "")).lower() or "shower" in str(row.get("description", "")).lower() else "-",
+        "thunder": "Yes" if "thunder" in str(row.get("description", "")).lower() or "storm" in str(row.get("description", "")).lower() else "-",
+        "description": row.get("description", "Daily forecast"),
+    }
+
+
+def summary_row_for_city(city_name):
+    cfg = CITIES[city_name]
+    tz_name = cfg["tz"]
+    now = local_now(tz_name)
+    today = now.date()
+    tomorrow = today + timedelta(days=1)
+
+    forecast_df = fetch_hourly_forecast(cfg["lat"], cfg["lon"], tz_name)
+    daily_df = fetch_daily_forecast(cfg["lat"], cfg["lon"], tz_name)
+    observed_df = fetch_obhistory(cfg["station"], tz_name)
+
+    today_hi, today_lo = projected_extremes_for_date(observed_df, forecast_df, today, tz_name)
+    tomorrow_hi, tomorrow_lo = projected_extremes_for_date(observed_df, forecast_df, tomorrow, tz_name)
+    official_tomorrow_hi = daily_high_for_date(daily_df, tomorrow)
+    if official_tomorrow_hi:
+        tomorrow_hi = official_tomorrow_hi
+
+    return {
+        "City": city_name,
+        "Station": cfg["station"],
+        "Local Time": now.strftime("%-I:%M %p %Z"),
+        "Today High": safe_int(today_hi.get("temp")) if today_hi else None,
+        "Today High Source": today_hi.get("source") if today_hi else None,
+        "Today Low": safe_int(today_lo.get("temp")) if today_lo else None,
+        "Today Low Source": today_lo.get("source") if today_lo else None,
+        "Tomorrow High": safe_int(tomorrow_hi.get("temp")) if tomorrow_hi else None,
+        "Tomorrow High Source": tomorrow_hi.get("source") if tomorrow_hi else None,
+        "Tomorrow Low": safe_int(tomorrow_lo.get("temp")) if tomorrow_lo else None,
+        "Tomorrow Low Source": tomorrow_lo.get("source") if tomorrow_lo else None,
+    }
+
+
+def kalshi_links_table():
+    rows = []
+    for city_name, cfg in CITIES.items():
+        query = f"{city_name} temperature"
+        rows.append({
+            "City": city_name,
+            "Station": cfg["station"],
+            "Kalshi Search": f"https://kalshi.com/markets?search={query.replace(' ', '%20')}",
+            "NWS Forecast": f"https://forecast.weather.gov/MapClick.php?lat={cfg['lat']}&lon={cfg['lon']}",
+            "NWS Observations": f"https://forecast.weather.gov/data/obhistory/{cfg['station']}.html",
+        })
+    return pd.DataFrame(rows)
+
+
+def render_all_cities():
+    st.subheader("All cities temperature summary")
+    with st.spinner("Loading all cities from NWS..."):
+        rows = []
+        for city_name in CITIES:
+            try:
+                rows.append(summary_row_for_city(city_name))
+            except Exception:
+                cfg = CITIES[city_name]
+                rows.append({
+                    "City": city_name,
+                    "Station": cfg["station"],
+                    "Local Time": "Unavailable",
+                    "Today High": None,
+                    "Today High Source": None,
+                    "Today Low": None,
+                    "Today Low Source": None,
+                    "Tomorrow High": None,
+                    "Tomorrow High Source": None,
+                    "Tomorrow Low": None,
+                    "Tomorrow Low Source": None,
+                })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=620)
+
+
+def render_links():
+    st.subheader("Links")
+    st.dataframe(
+        kalshi_links_table(),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Kalshi Search": st.column_config.LinkColumn("Kalshi Search"),
+            "NWS Forecast": st.column_config.LinkColumn("NWS Forecast"),
+            "NWS Observations": st.column_config.LinkColumn("NWS Observations"),
+        },
+        height=620,
+    )
+
+
 def plot_temperature(timeline, today_hi, today_lo, tomorrow_hi, tomorrow_lo):
     fig = go.Figure()
     for source, color in [("OBSERVED", "#ff5a3d"), ("FORECAST", "#5b6cff")]:
@@ -684,7 +841,17 @@ def plot_temperature(timeline, today_hi, today_lo, tomorrow_hi, tomorrow_lo):
 st.title("NWS Weather Monitor")
 st.caption("Fast monitor using official NWS station forecast + live station observation history.")
 
-selected_city = choose_city()
+selected_view = choose_view()
+
+if selected_view == "All cities":
+    render_all_cities()
+    st.stop()
+
+if selected_view == "Links":
+    render_links()
+    st.stop()
+
+selected_city = selected_view
 city_cfg = CITIES[selected_city]
 
 col_refresh, col_meta = st.columns([1, 4])
@@ -709,6 +876,11 @@ except Exception as e:
     forecast_df = pd.DataFrame()
 
 try:
+    daily_df = fetch_daily_forecast(city_cfg["lat"], city_cfg["lon"], tz_name)
+except Exception:
+    daily_df = pd.DataFrame()
+
+try:
     observed_df = fetch_obhistory(station, tz_name)
 except Exception:
     st.warning(f"Observed station history is unavailable for {selected_city} / {station}.")
@@ -719,6 +891,9 @@ today = now.date()
 tomorrow = today + timedelta(days=1)
 today_hi, today_lo = projected_extremes_for_date(observed_df, forecast_df, today, tz_name)
 tomorrow_hi, tomorrow_lo = projected_extremes_for_date(observed_df, forecast_df, tomorrow, tz_name)
+official_tomorrow_hi = daily_high_for_date(daily_df, tomorrow)
+if official_tomorrow_hi:
+    tomorrow_hi = official_tomorrow_hi
 
 st.subheader("Today projected temperatures")
 

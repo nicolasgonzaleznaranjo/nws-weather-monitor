@@ -249,6 +249,10 @@ Pick the city you want to monitor.
 
 The app updates as soon as you choose a city.
 
+Use **All cities** to see a temperature summary for every city.
+
+Use **Links** to see Kalshi search links and NWS links.
+
 ### Refresh now
 
 Click **Refresh now** if you want the newest National Weather Service data immediately.
