@@ -614,6 +614,42 @@ def fetch_observations_api(station, tz_name):
     return out
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_observations_for_day(station, tz_name, target_date):
+    tz = ZoneInfo(tz_name)
+    start = datetime.combine(target_date, time.min, tzinfo=tz)
+    end = datetime.combine(target_date, time(23, 59), tzinfo=tz)
+    url = f"https://api.weather.gov/stations/{station}/observations"
+    response = requests.get(
+        url,
+        headers=NWS_HEADERS,
+        params={"start": start.isoformat(), "end": end.isoformat(), "limit": 500},
+        timeout=25,
+    )
+    response.raise_for_status()
+
+    rows = []
+    for feature in response.json().get("features", []):
+        props = feature.get("properties", {})
+        timestamp = props.get("timestamp")
+        if not timestamp:
+            continue
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(tz)
+        temp = c_to_f(get_nested_value(props, "temperature"))
+        if temp is None:
+            continue
+        rows.append({
+            "datetime": parsed,
+            "date": parsed.date(),
+            "temp": temp,
+        })
+
+    out = pd.DataFrame(rows)
+    if not out.empty:
+        out = out.sort_values("datetime").reset_index(drop=True)
+    return out
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_obhistory(station, tz_name):
     url = f"https://forecast.weather.gov/data/obhistory/{station}.html"
@@ -886,11 +922,13 @@ def summary_row_for_city(city_name):
     cfg = CITIES[city_name]
     tz_name = cfg["tz"]
     now = local_now(tz_name)
+    yesterday = now.date() - timedelta(days=1)
     today = now.date()
     tomorrow = today + timedelta(days=1)
 
     forecast_df = fetch_hourly_forecast(cfg["station"], tz_name)
     daily_df = fetch_daily_forecast(cfg["station"], tz_name)
+    yesterday_df = fetch_observations_for_day(cfg["station"], tz_name, yesterday)
     today_rows = forecast_df[forecast_df["date"] == today].dropna(subset=["temp"])
     tomorrow_rows = forecast_df[forecast_df["date"] == tomorrow].dropna(subset=["temp"])
     today_daily_high = daily_high_for_date(daily_df, today)
@@ -902,6 +940,8 @@ def summary_row_for_city(city_name):
         "Min Tem": safe_int(today_rows["temp"].min()) if not today_rows.empty else None,
         "Max Temp ": safe_int(tomorrow_daily_high["temp"]) if tomorrow_daily_high else (safe_int(tomorrow_rows["temp"].max()) if not tomorrow_rows.empty else None),
         "Min Tem ": safe_int(tomorrow_rows["temp"].min()) if not tomorrow_rows.empty else None,
+        "Yesterday Max": safe_int(yesterday_df["temp"].max()) if not yesterday_df.empty else None,
+        "Yesterday Min": safe_int(yesterday_df["temp"].min()) if not yesterday_df.empty else None,
     }
 
 
@@ -929,7 +969,16 @@ def kalshi_links_table(today, tomorrow):
 
 
 def render_all_cities():
-    st.markdown('<h2 style="text-align:center;">All cities</h2>', unsafe_allow_html=True)
+    now = local_now("America/New_York")
+    left, center, right = st.columns([1, 2, 1])
+    with left:
+        st.markdown(
+            f'<div style="text-align:left; color:#b8bec9; font-weight:700; padding-top:.4rem;">{now.strftime("%b %-d, %Y · %-I:%M %p %Z")}</div>',
+            unsafe_allow_html=True,
+        )
+    with center:
+        st.markdown('<h2 style="text-align:center; margin-top:0;">All cities</h2>', unsafe_allow_html=True)
+
     with st.spinner("Loading all cities from NWS..."):
         results = {}
         with ThreadPoolExecutor(max_workers=8) as executor:
@@ -945,6 +994,8 @@ def render_all_cities():
                         "Min Tem": None,
                         "Max Temp ": None,
                         "Min Tem ": None,
+                        "Yesterday Max": None,
+                        "Yesterday Min": None,
                     }
         rows = [results[city_name] for city_name in CITIES]
     df = pd.DataFrame(rows)
@@ -961,6 +1012,8 @@ def render_all_cities():
             "Today Min": "{:.0f}",
             "Tomorrow Max": "{:.0f}",
             "Tomorrow Min": "{:.0f}",
+            "Yesterday Max": "{:.0f}",
+            "Yesterday Min": "{:.0f}",
         }, na_rep="")
         .set_properties(**{"text-align": "center", "font-weight": "700"})
         .set_table_styles([
@@ -980,6 +1033,8 @@ def render_all_cities():
             "Today Min": st.column_config.NumberColumn("Today Min", format="%d", width="small"),
             "Tomorrow Max": st.column_config.NumberColumn("Tomorrow Max", format="%d", width="small"),
             "Tomorrow Min": st.column_config.NumberColumn("Tomorrow Min", format="%d", width="small"),
+            "Yesterday Max": st.column_config.NumberColumn("Yesterday Max", format="%d", width="small"),
+            "Yesterday Min": st.column_config.NumberColumn("Yesterday Min", format="%d", width="small"),
         },
     )
 
