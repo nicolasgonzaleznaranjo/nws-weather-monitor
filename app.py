@@ -1073,30 +1073,32 @@ def render_all_cities():
                     }
         rows = [results[city_name] for city_name in CITIES]
     df = pd.DataFrame(rows)
-    styled_df = (
-        df.style
-        .format({
-            "Digital Tomorrow Max": "{:.0f}",
-            "Digital Tomorrow Min": "{:.0f}",
-        }, na_rep="")
-        .set_properties(**{"text-align": "center", "font-weight": "700"})
-        .set_table_styles([
-            {"selector": "th", "props": [("text-align", "center")]},
-            {"selector": "td", "props": [("text-align", "center")]},
+    table_style = "width:100%; border-collapse:separate; border-spacing:0; font-size:0.95rem; overflow:hidden; border:1px solid #303746; border-radius:8px;"
+    th = "background:#1b1f2a; border-bottom:1px solid #303746; padding:9px 10px; text-align:center; font-weight:800;"
+    td = "border-bottom:1px solid #303746; padding:7px 10px; text-align:center; font-weight:700;"
+    html = [
+        f'<table style="{table_style}">',
+        "<thead>",
+        "<tr>",
+        f'<th style="{th}">City</th>',
+        f'<th style="{th}">Digital Tomorrow Max</th>',
+        f'<th style="{th}">Digital Tomorrow Min</th>',
+        "</tr>",
+        "</thead>",
+        "<tbody>",
+    ]
+    for _, row in df.iterrows():
+        max_temp = "" if pd.isna(row["Digital Tomorrow Max"]) else int(row["Digital Tomorrow Max"])
+        min_temp = "" if pd.isna(row["Digital Tomorrow Min"]) else int(row["Digital Tomorrow Min"])
+        html.extend([
+            "<tr>",
+            f'<td style="{td}">{escape(str(row["City"]))}</td>',
+            f'<td style="{td}">{max_temp}</td>',
+            f'<td style="{td}">{min_temp}</td>',
+            "</tr>",
         ])
-    )
-    height = 38 + (len(df) + 1) * 35
-    st.dataframe(
-        styled_df,
-        use_container_width=True,
-        hide_index=True,
-        height=height,
-        column_config={
-            "City": st.column_config.TextColumn("City", width="medium"),
-            "Digital Tomorrow Max": st.column_config.NumberColumn("Digital Tomorrow Max", format="%d", width="small"),
-            "Digital Tomorrow Min": st.column_config.NumberColumn("Digital Tomorrow Min", format="%d", width="small"),
-        },
-    )
+    html.extend(["</tbody>", "</table>"])
+    st.markdown("".join(html), unsafe_allow_html=True)
 
 
 def render_links():
