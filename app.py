@@ -46,10 +46,33 @@ DISPLAY_CITY = {
     "Seattle/Tacoma": "Seattle",
 }
 
+DIGITAL_FORECAST_URLS_BY_STATION = {
+    "KATL": "https://forecast.weather.gov/MapClick.php?lat=33.6367&lon=-84.4279&lg=english&&FcstType=digital",
+    "KAUS": "https://forecast.weather.gov/MapClick.php?lat=30.1945&lon=-97.6699&lg=english&&FcstType=digital",
+    "KBOS": "https://forecast.weather.gov/MapClick.php?lat=42.3629&lon=-71.0064&lg=english&&FcstType=digital",
+    "KMDW": "https://forecast.weather.gov/MapClick.php?lat=41.7868&lon=-87.7455&lg=english&&FcstType=digital",
+    "KDFW": "https://forecast.weather.gov/MapClick.php?lat=32.8972&lon=-97.0377&lg=english&&FcstType=digital",
+    "KDEN": "https://forecast.weather.gov/MapClick.php?lat=39.8589&lon=-104.6733&lg=english&&FcstType=digital",
+    "KHOU": "https://forecast.weather.gov/MapClick.php?lat=29.6524&lon=-95.2772&lg=english&&FcstType=digital",
+    "KLAS": "https://forecast.weather.gov/MapClick.php?lat=36.08&lon=-115.1522&lg=english&&FcstType=digital",
+    "KLAX": "https://forecast.weather.gov/MapClick.php?lat=33.9425&lon=-118.409&lg=english&&FcstType=digital",
+    "KMIA": "https://forecast.weather.gov/MapClick.php?lat=25.7954&lon=-80.2901&lg=english&&FcstType=digital",
+    "KMSP": "https://forecast.weather.gov/MapClick.php?lat=44.882&lon=-93.2218&lg=english&&FcstType=digital",
+    "KMSY": "https://forecast.weather.gov/MapClick.php?lat=29.9933&lon=-90.259&lg=english&&FcstType=digital",
+    "KNYC": "https://forecast.weather.gov/MapClick.php?lat=40.7834&lon=-73.965&lg=english&&FcstType=digital",
+    "KOKC": "https://forecast.weather.gov/MapClick.php?lat=35.3931&lon=-97.6009&lg=english&&FcstType=digital",
+    "KPHL": "https://forecast.weather.gov/MapClick.php?lat=39.8721&lon=-75.2407&lg=english&&FcstType=digital",
+    "KPHX": "https://forecast.weather.gov/MapClick.php?lat=33.4355&lon=-111.9981&lg=english&&FcstType=digital",
+    "KSAT": "https://forecast.weather.gov/MapClick.php?lat=29.5338&lon=-98.47&lg=english&&FcstType=digital",
+    "KSFO": "https://forecast.weather.gov/MapClick.php?lat=37.6188&lon=-122.3754&lg=english&&FcstType=digital",
+    "KSEA": "https://forecast.weather.gov/MapClick.php?lat=47.4499&lon=-122.3118&lg=english&&FcstType=digital",
+    "KDCA": "https://forecast.weather.gov/MapClick.php?lat=38.8514&lon=-77.0377&lg=english&&FcstType=digital",
+}
+
 KALSHI_MARKETS = {
     "Atlanta": {"low": ("kxlowtatl", "atlanta-daily-low-temperature"), "high": ("kxhightatl", "atlanta-max-temperature")},
     "Austin": {"low": ("kxlowtaus", "austin-low-temperature"), "high": ("kxhighaus", "highest-temperature-in-austin")},
-    "Boston": {"low": ("kxlowtbos", "boston-daily-low-temperature"), "high": ("kxhighbos", "highest-temperature-in-boston")},
+    "Boston": {"low": ("kxlowtbos", "low-temperature-boston"), "high": ("kxhightbos", "boston-maximum-daily-temperature")},
     "Chicago": {"low": ("kxlowtchi", "chicago-daily-low-temperature"), "high": ("kxhighchi", "highest-temperature-in-chicago")},
     "Dallas": {"low": ("kxlowtdal", "dallas-daily-low-temperature"), "high": ("kxhightdal", "dallas-maximum-temperature")},
     "Denver": {"low": ("kxlowtden", "denver-low-temperature"), "high": ("kxhighden", "highest-temperature-in-denver")},
@@ -59,14 +82,14 @@ KALSHI_MARKETS = {
     "Miami": {"low": ("kxlowtmia", "miami-low-temperature"), "high": ("kxhighmia", "highest-temperature-in-miami")},
     "Minneapolis": {"low": ("kxlowtmin", "minneapolis-low-temperature"), "high": ("kxhightmin", "minneapolis-daily-high-temperature")},
     "New Orleans": {"low": ("kxlowtnola", "new-orleans-low-temp-daily"), "high": ("kxhightnola", "new-orleans-max-temp-daily")},
-    "New York City": {"low": ("kxlowtnyc", "new-york-city-low-temperature"), "high": ("kxhighnyc", "highest-temperature-in-new-york-city")},
-    "Oklahoma City": {"low": ("kxlowtokc", "oklahoma-city-low-temperature"), "high": ("kxhighokc", "highest-temperature-in-oklahoma-city")},
-    "Philadelphia": {"low": ("kxlowtphi", "philadelphia-low-temperature"), "high": ("kxhighphi", "highest-temperature-in-philadelphia")},
+    "New York City": {"low": ("kxlowtnyc", "new-york-city-low-temperature"), "high": ("kxhighny", "highest-temperature-in-nyc")},
+    "Oklahoma City": {"low": ("kxlowtokc", "oklahoma-city-low-temperature"), "high": ("kxhightokc", "oklahoma-city-maximum-high-temperature")},
+    "Philadelphia": {"low": ("kxlowtphil", "lowest-temperature-in-philadelphia"), "high": ("kxhighphil", "highest-temperature-in-philadelphia")},
     "Phoenix": {"low": ("kxlowtphx", "low-temperature-phoenix"), "high": ("kxhightphx", "high-temperature-phoenix")},
     "San Antonio": {"low": ("kxlowtsatx", "san-antonio-daily-low-temperature"), "high": ("kxhightsatx", "san-antonio-daily-maximum-temperature")},
-    "San Francisco": {"low": ("kxlowtsfo", "san-francisco-low-temperature"), "high": ("kxhighsfo", "highest-temperature-in-san-francisco")},
-    "Seattle/Tacoma": {"low": ("kxlowtsea", "seattle-low-temperature"), "high": ("kxhighsea", "highest-temperature-in-seattle")},
-    "Washington DC": {"low": ("kxlowtdc", "washington-dc-low-temperature"), "high": ("kxhighdc", "highest-temperature-in-washington-dc")},
+    "San Francisco": {"low": ("kxlowtsfo", "san-francisco-low-temperature"), "high": ("kxhightsfo", "san-francisco-high-temperature-daily")},
+    "Seattle/Tacoma": {"low": ("kxlowtsea", "seattle-low-temperature"), "high": ("kxhightsea", "seattle-maximum-temperature-daily")},
+    "Washington DC": {"low": ("kxlowtdc", "washington-dc-low-temperature"), "high": ("kxhightdc", "washington-dc-daily-max-temp")},
 }
 
 # -----------------------------
@@ -298,6 +321,15 @@ def value_at_hour(values, hour):
     return None
 
 
+def parse_digital_hour(value):
+    text = str(value).strip()
+    match = re.search(r"\d{1,2}", text)
+    if not match:
+        return None
+    hour = int(match.group(0))
+    return hour if 0 <= hour <= 23 else None
+
+
 def kph_to_mph(value):
     if value is None:
         return None
@@ -429,6 +461,67 @@ def fetch_hourly_forecast(station, tz_name):
         return fetch_grid_forecast(station, tz_name)
     except Exception:
         return fetch_api_hourly_forecast(station, tz_name)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_digital_forecast(station, tz_name):
+    url = DIGITAL_FORECAST_URLS_BY_STATION.get(station)
+    if not url:
+        lat, lon = fetch_station_point(station)
+        url = f"https://forecast.weather.gov/MapClick.php?lat={lat:.4f}&lon={lon:.4f}&lg=english&&FcstType=digital"
+    response = requests.get(url, headers=NWS_HEADERS, timeout=30)
+    response.raise_for_status()
+    tables = pd.read_html(StringIO(response.text))
+    tz = ZoneInfo(tz_name)
+    now = local_now(tz_name)
+
+    for table in tables:
+        clean = table.astype(str).replace({"nan": ""})
+        date_row = hour_row = temp_row = None
+        for _, row in clean.iterrows():
+            row_text = " ".join(str(v) for v in row.tolist()).lower()
+            first_cells = " ".join(str(v) for v in row.iloc[:2].tolist()).lower()
+            if "date" in first_cells and date_row is None:
+                date_row = row.tolist()
+            elif "hour" in first_cells and hour_row is None:
+                hour_row = row.tolist()
+            elif "temperature" in row_text and "dewpoint" not in row_text and temp_row is None:
+                temp_row = row.tolist()
+
+        if date_row is None or hour_row is None or temp_row is None:
+            continue
+
+        rows = []
+        current_date = None
+        width = max(len(date_row), len(hour_row), len(temp_row))
+        for col in range(1, width):
+            date_val = date_row[col] if col < len(date_row) else ""
+            parsed_date = parse_mmdd_date(date_val, now.year)
+            if parsed_date is not None:
+                current_date = parsed_date
+            if current_date is None:
+                continue
+
+            hour_val = hour_row[col] if col < len(hour_row) else ""
+            temp_val = temp_row[col] if col < len(temp_row) else None
+            hour = parse_digital_hour(hour_val)
+            temp = safe_float(temp_val)
+            if hour is None or temp is None:
+                continue
+
+            dt = datetime.combine(current_date, time(hour), tzinfo=tz)
+            rows.append({
+                "datetime": dt,
+                "date": dt.date(),
+                "hour": hour,
+                "source": "DIGITAL",
+                "temp": temp,
+            })
+
+        if rows:
+            return pd.DataFrame(rows).sort_values("datetime").reset_index(drop=True)
+
+    return pd.DataFrame()
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -922,46 +1015,35 @@ def summary_row_for_city(city_name):
     cfg = CITIES[city_name]
     tz_name = cfg["tz"]
     now = local_now(tz_name)
-    yesterday = now.date() - timedelta(days=1)
-    today = now.date()
-    tomorrow = today + timedelta(days=1)
+    tomorrow = now.date() + timedelta(days=1)
 
-    forecast_df = fetch_hourly_forecast(cfg["station"], tz_name)
-    daily_df = fetch_daily_forecast(cfg["station"], tz_name)
-    yesterday_df = fetch_observations_for_day(cfg["station"], tz_name, yesterday)
-    today_rows = forecast_df[forecast_df["date"] == today].dropna(subset=["temp"])
-    tomorrow_rows = forecast_df[forecast_df["date"] == tomorrow].dropna(subset=["temp"])
-    today_daily_high = daily_high_for_date(daily_df, today)
-    tomorrow_daily_high = daily_high_for_date(daily_df, tomorrow)
+    api_df = fetch_hourly_forecast(cfg["station"], tz_name)
+    digital_df = fetch_digital_forecast(cfg["station"], tz_name)
+    api_rows = api_df[api_df["date"] == tomorrow].dropna(subset=["temp"]) if not api_df.empty else pd.DataFrame()
+    digital_rows = digital_df[digital_df["date"] == tomorrow].dropna(subset=["temp"]) if not digital_df.empty else pd.DataFrame()
 
     return {
         "City": display_city(city_name),
-        "Max Temp": safe_int(today_daily_high["temp"]) if today_daily_high else (safe_int(today_rows["temp"].max()) if not today_rows.empty else None),
-        "Min Tem": safe_int(today_rows["temp"].min()) if not today_rows.empty else None,
-        "Max Temp ": safe_int(tomorrow_daily_high["temp"]) if tomorrow_daily_high else (safe_int(tomorrow_rows["temp"].max()) if not tomorrow_rows.empty else None),
-        "Min Tem ": safe_int(tomorrow_rows["temp"].min()) if not tomorrow_rows.empty else None,
-        "Yesterday Max": safe_int(yesterday_df["temp"].max()) if not yesterday_df.empty else None,
-        "Yesterday Min": safe_int(yesterday_df["temp"].min()) if not yesterday_df.empty else None,
+        "API Tomorrow Max": safe_int(api_rows["temp"].max()) if not api_rows.empty else None,
+        "API Tomorrow Min": safe_int(api_rows["temp"].min()) if not api_rows.empty else None,
+        "Digital Tomorrow Max": safe_int(digital_rows["temp"].max()) if not digital_rows.empty else None,
+        "Digital Tomorrow Min": safe_int(digital_rows["temp"].min()) if not digital_rows.empty else None,
     }
 
 
 def kalshi_url(city_name, side, dt):
     ticker, slug = KALSHI_MARKETS[city_name][side]
-    return f"https://kalshi.com/markets/{ticker}/{slug}/{ticker}-{clean_link_date(dt)}?utm_source=chatgpt.com"
+    return f"https://kalshi.com/markets/{ticker}/{slug}/{ticker}-{clean_link_date(dt)}"
 
 
-def kalshi_links_table(today, tomorrow):
+def kalshi_links_table(tomorrow):
     rows = []
     for city_name in CITIES:
         name = display_city(city_name)
         rows.append({
             "City": name,
-            "Low Today": f"{name} Low Today",
-            "High Today": f"{name} High Today",
             "Low Tomorrow": f"{name} Low",
             "High Tomorrow": f"{name} High",
-            "_Low Today URL": kalshi_url(city_name, "low", today),
-            "_High Today URL": kalshi_url(city_name, "high", today),
             "_Low Tomorrow URL": kalshi_url(city_name, "low", tomorrow),
             "_High Tomorrow URL": kalshi_url(city_name, "high", tomorrow),
         })
@@ -990,30 +1072,20 @@ def render_all_cities():
                 except Exception:
                     results[city_name] = {
                         "City": display_city(city_name),
-                        "Max Temp": None,
-                        "Min Tem": None,
-                        "Max Temp ": None,
-                        "Min Tem ": None,
-                        "Yesterday Max": None,
-                        "Yesterday Min": None,
+                        "API Tomorrow Max": None,
+                        "API Tomorrow Min": None,
+                        "Digital Tomorrow Max": None,
+                        "Digital Tomorrow Min": None,
                     }
         rows = [results[city_name] for city_name in CITIES]
     df = pd.DataFrame(rows)
-    df = df.rename(columns={
-        "Max Temp": "Today Max",
-        "Min Tem": "Today Min",
-        "Max Temp ": "Tomorrow Max",
-        "Min Tem ": "Tomorrow Min",
-    })
     styled_df = (
         df.style
         .format({
-            "Today Max": "{:.0f}",
-            "Today Min": "{:.0f}",
-            "Tomorrow Max": "{:.0f}",
-            "Tomorrow Min": "{:.0f}",
-            "Yesterday Max": "{:.0f}",
-            "Yesterday Min": "{:.0f}",
+            "API Tomorrow Max": "{:.0f}",
+            "API Tomorrow Min": "{:.0f}",
+            "Digital Tomorrow Max": "{:.0f}",
+            "Digital Tomorrow Min": "{:.0f}",
         }, na_rep="")
         .set_properties(**{"text-align": "center", "font-weight": "700"})
         .set_table_styles([
@@ -1029,12 +1101,10 @@ def render_all_cities():
         height=height,
         column_config={
             "City": st.column_config.TextColumn("City", width="medium"),
-            "Today Max": st.column_config.NumberColumn("Today Max", format="%d", width="small"),
-            "Today Min": st.column_config.NumberColumn("Today Min", format="%d", width="small"),
-            "Tomorrow Max": st.column_config.NumberColumn("Tomorrow Max", format="%d", width="small"),
-            "Tomorrow Min": st.column_config.NumberColumn("Tomorrow Min", format="%d", width="small"),
-            "Yesterday Max": st.column_config.NumberColumn("Yesterday Max", format="%d", width="small"),
-            "Yesterday Min": st.column_config.NumberColumn("Yesterday Min", format="%d", width="small"),
+            "API Tomorrow Max": st.column_config.NumberColumn("API Tomorrow Max", format="%d", width="small"),
+            "API Tomorrow Min": st.column_config.NumberColumn("API Tomorrow Min", format="%d", width="small"),
+            "Digital Tomorrow Max": st.column_config.NumberColumn("Digital Tomorrow Max", format="%d", width="small"),
+            "Digital Tomorrow Min": st.column_config.NumberColumn("Digital Tomorrow Min", format="%d", width="small"),
         },
     )
 
@@ -1042,9 +1112,8 @@ def render_all_cities():
 def render_links():
     st.markdown('<h2 style="text-align:center;">Links</h2>', unsafe_allow_html=True)
     now = local_now("America/New_York")
-    today = now.date()
-    tomorrow = today + timedelta(days=1)
-    df = kalshi_links_table(today, tomorrow)
+    tomorrow = now.date() + timedelta(days=1)
+    df = kalshi_links_table(tomorrow)
     table_style = "width:100%; border-collapse:collapse; font-size:0.95rem; text-align:center;"
     th = "border:1px solid #303746; padding:4px; text-align:center;"
     td = "border:1px solid #303746; padding:3px; text-align:center;"
@@ -1053,8 +1122,6 @@ def render_links():
         "<thead>",
         "<tr>",
         f'<th style="{th}">City</th>',
-        f'<th style="{th}">Low Today</th>',
-        f'<th style="{th}">High Today</th>',
         f'<th style="{th}">Low Tomorrow</th>',
         f'<th style="{th}">High Tomorrow</th>',
         "</tr>",
@@ -1065,8 +1132,6 @@ def render_links():
         html.extend([
             "<tr>",
             f'<td style="{td}">{escape(str(row["City"]))}</td>',
-            f'<td style="{td}"><a href="{escape(row["_Low Today URL"])}" target="_blank">{escape(row["Low Today"])}</a></td>',
-            f'<td style="{td}"><a href="{escape(row["_High Today URL"])}" target="_blank">{escape(row["High Today"])}</a></td>',
             f'<td style="{td}"><a href="{escape(row["_Low Tomorrow URL"])}" target="_blank">{escape(row["Low Tomorrow"])}</a></td>',
             f'<td style="{td}"><a href="{escape(row["_High Tomorrow URL"])}" target="_blank">{escape(row["High Tomorrow"])}</a></td>',
             "</tr>",
