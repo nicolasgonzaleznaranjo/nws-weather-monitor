@@ -1017,15 +1017,11 @@ def summary_row_for_city(city_name):
     now = local_now(tz_name)
     tomorrow = now.date() + timedelta(days=1)
 
-    api_df = fetch_hourly_forecast(cfg["station"], tz_name)
     digital_df = fetch_digital_forecast(cfg["station"], tz_name)
-    api_rows = api_df[api_df["date"] == tomorrow].dropna(subset=["temp"]) if not api_df.empty else pd.DataFrame()
     digital_rows = digital_df[digital_df["date"] == tomorrow].dropna(subset=["temp"]) if not digital_df.empty else pd.DataFrame()
 
     return {
         "City": display_city(city_name),
-        "API Tomorrow Max": safe_int(api_rows["temp"].max()) if not api_rows.empty else None,
-        "API Tomorrow Min": safe_int(api_rows["temp"].min()) if not api_rows.empty else None,
         "Digital Tomorrow Max": safe_int(digital_rows["temp"].max()) if not digital_rows.empty else None,
         "Digital Tomorrow Min": safe_int(digital_rows["temp"].min()) if not digital_rows.empty else None,
     }
@@ -1072,8 +1068,6 @@ def render_all_cities():
                 except Exception:
                     results[city_name] = {
                         "City": display_city(city_name),
-                        "API Tomorrow Max": None,
-                        "API Tomorrow Min": None,
                         "Digital Tomorrow Max": None,
                         "Digital Tomorrow Min": None,
                     }
@@ -1082,8 +1076,6 @@ def render_all_cities():
     styled_df = (
         df.style
         .format({
-            "API Tomorrow Max": "{:.0f}",
-            "API Tomorrow Min": "{:.0f}",
             "Digital Tomorrow Max": "{:.0f}",
             "Digital Tomorrow Min": "{:.0f}",
         }, na_rep="")
@@ -1101,8 +1093,6 @@ def render_all_cities():
         height=height,
         column_config={
             "City": st.column_config.TextColumn("City", width="medium"),
-            "API Tomorrow Max": st.column_config.NumberColumn("API Tomorrow Max", format="%d", width="small"),
-            "API Tomorrow Min": st.column_config.NumberColumn("API Tomorrow Min", format="%d", width="small"),
             "Digital Tomorrow Max": st.column_config.NumberColumn("Digital Tomorrow Max", format="%d", width="small"),
             "Digital Tomorrow Min": st.column_config.NumberColumn("Digital Tomorrow Min", format="%d", width="small"),
         },
