@@ -297,6 +297,10 @@ def clean_link_date(dt):
     return dt.strftime("%y%b%d").lower()
 
 
+def tomorrow_contract_date():
+    return local_now("America/New_York").date() + timedelta(days=1)
+
+
 def parse_valid_time(valid_time):
     start_text, duration_text = valid_time.split("/")
     start = datetime.fromisoformat(start_text.replace("Z", "+00:00"))
@@ -1027,12 +1031,13 @@ def summary_row_for_city(city_name):
     }
 
 
-def kalshi_url(city_name, side, dt):
+def kalshi_url(city_name, side, contract_date):
     ticker, slug = KALSHI_MARKETS[city_name][side]
-    return f"https://kalshi.com/markets/{ticker}/{slug}/{ticker}-{clean_link_date(dt)}"
+    date_code = clean_link_date(contract_date)
+    return f"https://kalshi.com/markets/{ticker}/{slug}/{ticker}-{date_code}"
 
 
-def kalshi_links_table(tomorrow):
+def kalshi_links_table(contract_date):
     rows = []
     for city_name in CITIES:
         name = display_city(city_name)
@@ -1040,8 +1045,8 @@ def kalshi_links_table(tomorrow):
             "City": name,
             "Low Tomorrow": f"{name} Low",
             "High Tomorrow": f"{name} High",
-            "_Low Tomorrow URL": kalshi_url(city_name, "low", tomorrow),
-            "_High Tomorrow URL": kalshi_url(city_name, "high", tomorrow),
+            "_Low Tomorrow URL": kalshi_url(city_name, "low", contract_date),
+            "_High Tomorrow URL": kalshi_url(city_name, "high", contract_date),
         })
     return pd.DataFrame(rows)
 
@@ -1103,9 +1108,13 @@ def render_all_cities():
 
 def render_links():
     st.markdown('<h2 style="text-align:center;">Links</h2>', unsafe_allow_html=True)
-    now = local_now("America/New_York")
-    tomorrow = now.date() + timedelta(days=1)
-    df = kalshi_links_table(tomorrow)
+    contract_date = tomorrow_contract_date()
+    date_code = clean_link_date(contract_date)
+    st.markdown(
+        f'<div style="text-align:center; color:#b8bec9; font-weight:700; margin-top:-.35rem; margin-bottom:1rem;">Tomorrow contract date: {contract_date.strftime("%b %-d, %Y")} · {date_code}</div>',
+        unsafe_allow_html=True,
+    )
+    df = kalshi_links_table(contract_date)
     table_style = "width:100%; border-collapse:collapse; font-size:0.95rem; text-align:center;"
     th = "border:1px solid #303746; padding:4px; text-align:center;"
     td = "border:1px solid #303746; padding:3px; text-align:center;"
@@ -1226,6 +1235,8 @@ today_hi, today_lo = projected_extremes_for_date(observed_df, forecast_df, today
 tomorrow_hi, tomorrow_lo = projected_extremes_for_date(observed_df, forecast_df, tomorrow, tz_name)
 today_hi = official_projected_high(observed_df, forecast_df, daily_df, today, tz_name)
 tomorrow_hi = official_projected_high(observed_df, forecast_df, daily_df, tomorrow, tz_name)
+chart_today_hi, chart_today_lo = extremes_for_date(timeline, today)
+chart_tomorrow_hi, chart_tomorrow_lo = extremes_for_date(timeline, tomorrow)
 
 st.subheader("Today projected temperatures")
 
@@ -1263,7 +1274,10 @@ with st.expander("Tomorrow projected temperatures", expanded=False):
                 st.metric(title, "N/A", "")
 
 if not timeline.empty:
-    st.plotly_chart(plot_temperature(timeline, today_hi, today_lo, tomorrow_hi, tomorrow_lo), use_container_width=True)
+    st.plotly_chart(
+        plot_temperature(timeline, chart_today_hi, chart_today_lo, chart_tomorrow_hi, chart_tomorrow_lo),
+        use_container_width=True,
+    )
 else:
     st.error("No timeline data available.")
 
