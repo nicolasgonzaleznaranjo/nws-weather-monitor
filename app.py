@@ -505,6 +505,7 @@ def fetch_digital_forecast(station, tz_name):
     for table in tables:
         clean = table.astype(str).replace({"nan": ""})
         date_row = hour_row = temp_row = None
+        dew_row = heat_row = wind_row = wind_dir_row = gust_row = sky_row = precip_row = humidity_row = rain_row = thunder_row = None
         for _, row in clean.iterrows():
             row_text = " ".join(str(v) for v in row.tolist()).lower()
             first_cells = " ".join(str(v) for v in row.iloc[:2].tolist()).lower()
@@ -514,6 +515,26 @@ def fetch_digital_forecast(station, tz_name):
                 hour_row = row.tolist()
             elif "temperature" in row_text and "dewpoint" not in row_text and temp_row is None:
                 temp_row = row.tolist()
+            elif "dewpoint" in row_text and dew_row is None:
+                dew_row = row.tolist()
+            elif "heat index" in row_text and heat_row is None:
+                heat_row = row.tolist()
+            elif "surface wind" in row_text and wind_row is None:
+                wind_row = row.tolist()
+            elif "wind dir" in row_text and wind_dir_row is None:
+                wind_dir_row = row.tolist()
+            elif "gust" in row_text and gust_row is None:
+                gust_row = row.tolist()
+            elif "sky cover" in row_text and sky_row is None:
+                sky_row = row.tolist()
+            elif "precipitation" in row_text and precip_row is None:
+                precip_row = row.tolist()
+            elif "relative" in row_text and "humidity" in row_text and humidity_row is None:
+                humidity_row = row.tolist()
+            elif "rain" in first_cells and rain_row is None:
+                rain_row = row.tolist()
+            elif "thunder" in first_cells and thunder_row is None:
+                thunder_row = row.tolist()
 
         if date_row is None or hour_row is None or temp_row is None:
             continue
@@ -537,12 +558,34 @@ def fetch_digital_forecast(station, tz_name):
                 continue
 
             dt = datetime.combine(current_date, time(hour), tzinfo=tz)
+            dewpoint = safe_float(dew_row[col]) if dew_row and col < len(dew_row) else None
+            heat_index = safe_float(heat_row[col]) if heat_row and col < len(heat_row) else None
+            wind_mph = safe_float(wind_row[col]) if wind_row and col < len(wind_row) else None
+            gust_mph = safe_float(gust_row[col]) if gust_row and col < len(gust_row) else None
+            sky_cover = safe_float(sky_row[col]) if sky_row and col < len(sky_row) else None
+            precip = safe_float(precip_row[col]) if precip_row and col < len(precip_row) else None
+            humidity = safe_float(humidity_row[col]) if humidity_row and col < len(humidity_row) else None
+            wind_dir = str(wind_dir_row[col]).strip() if wind_dir_row and col < len(wind_dir_row) else "-"
+            rain = str(rain_row[col]).strip() if rain_row and col < len(rain_row) else "-"
+            thunder = str(thunder_row[col]).strip() if thunder_row and col < len(thunder_row) else "-"
             rows.append({
                 "datetime": dt,
                 "date": dt.date(),
                 "hour": hour,
-                "source": "DIGITAL",
+                "time": dt.strftime("%a %-I %p"),
+                "source": "FORECAST",
                 "temp": temp,
+                "dewpoint": dewpoint,
+                "heat_index": heat_index if heat_index is not None else temp,
+                "wind_mph": wind_mph,
+                "wind_dir": wind_dir,
+                "gust_mph": gust_mph,
+                "sky_cover": sky_cover,
+                "precip": precip,
+                "humidity": humidity,
+                "rain": rain if rain and rain.lower() != "nan" else "-",
+                "thunder": thunder if thunder and thunder.lower() != "nan" else "-",
+                "description": "NWS digital forecast",
             })
 
         if rows:
@@ -669,6 +712,7 @@ def parse_obhistory_datetime(raw_dt, now, tz):
     formats = [
         "%d %b %I:%M %p",
         "%d %B %I:%M %p",
+        "%d %I:%M %p",
         "%d %H:%M",
         "%b %d %I:%M %p",
         "%B %d %I:%M %p",
@@ -832,7 +876,7 @@ def fetch_obhistory(station, tz_name):
 
     date_col = find_col([["date", "time"], ["date"]])
     time_col = find_col([["time"]])
-    temp_col = find_col([["temperature", "air"], ["temp", "air"], ["air"]])
+    temp_col = find_col([["temperature", "air"], ["temp", "air"], ["temp"], ["air"]])
     dew_col = find_col([["dew"]])
     rh_col = find_col([["relative", "humidity"], ["humidity"]])
     heat_col = find_col([["heat", "index"]])
@@ -1273,15 +1317,10 @@ with col_meta:
     )
 
 try:
-    forecast_df = fetch_hourly_forecast(station, tz_name)
+    forecast_df = fetch_digital_forecast(station, tz_name)
 except Exception as e:
     st.error(f"Forecast data is unavailable for {selected_city} / {station}.")
     forecast_df = pd.DataFrame()
-
-try:
-    daily_df = fetch_daily_forecast(station, tz_name)
-except Exception:
-    daily_df = pd.DataFrame()
 
 try:
     observed_df = fetch_obhistory(station, tz_name)
@@ -1289,13 +1328,16 @@ except Exception:
     st.warning(f"Observed station history is unavailable for {selected_city} / {station}.")
     observed_df = pd.DataFrame()
 
+try:
+    current_df = fetch_observations_api(station, tz_name)
+except Exception:
+    current_df = pd.DataFrame()
+
 timeline = build_timeline(observed_df, forecast_df, tz_name)
 today = now.date()
 tomorrow = today + timedelta(days=1)
 today_hi, today_lo = projected_extremes_for_date(observed_df, forecast_df, today, tz_name)
 tomorrow_hi, tomorrow_lo = projected_extremes_for_date(observed_df, forecast_df, tomorrow, tz_name)
-today_hi = official_projected_high(observed_df, forecast_df, daily_df, today, tz_name)
-tomorrow_hi = official_projected_high(observed_df, forecast_df, daily_df, tomorrow, tz_name)
 chart_today_hi, chart_today_lo = extremes_for_date(timeline, today)
 chart_tomorrow_hi, chart_tomorrow_lo = extremes_for_date(timeline, tomorrow)
 
@@ -1343,7 +1385,7 @@ else:
     st.error("No timeline data available.")
 
 st.subheader("Current conditions")
-latest_obs = observed_df.iloc[-1].to_dict() if not observed_df.empty else None
+latest_obs = current_df.iloc[-1].to_dict() if not current_df.empty else None
 if latest_obs:
     cc1, cc2, cc3, cc4 = st.columns(4)
     cc1.metric("Current Temp", fmt_temp(latest_obs.get("temp")))
