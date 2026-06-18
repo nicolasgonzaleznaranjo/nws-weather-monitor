@@ -626,7 +626,7 @@ def _parse_obhistory_html(html_text):
             for col in table.columns
         ]
         joined = " ".join(table.columns).lower()
-        if "date/time" in joined and "temp" in joined:
+        if "date" in joined and "time" in joined and ("temp" in joined or "air" in joined):
             return table
     return pd.DataFrame()
 
@@ -652,9 +652,24 @@ def parse_obhistory_datetime(raw_dt, now, tz):
     text = re.sub(r"\s+(EDT|EST|CDT|CST|MDT|MST|PDT|PST|MST|AKDT|AKST|HST)$", "", text, flags=re.IGNORECASE)
     text = re.sub(r"\b(am|pm)\b", lambda m: m.group(1).upper(), text, flags=re.IGNORECASE)
 
+    day_hour_match = re.fullmatch(r"(\d{1,2})\s+(\d{1,2}):(\d{2})", text)
+    if day_hour_match:
+        day = int(day_hour_match.group(1))
+        hour = int(day_hour_match.group(2))
+        minute = int(day_hour_match.group(3))
+        try:
+            parsed = datetime(now.year, now.month, day, hour, minute, tzinfo=tz)
+            if parsed - now > timedelta(days=2):
+                previous_month = (now.replace(day=1) - timedelta(days=1))
+                parsed = parsed.replace(year=previous_month.year, month=previous_month.month)
+            return parsed
+        except Exception:
+            pass
+
     formats = [
         "%d %b %I:%M %p",
         "%d %B %I:%M %p",
+        "%d %H:%M",
         "%b %d %I:%M %p",
         "%B %d %I:%M %p",
         "%b %d, %I:%M %p",
@@ -815,8 +830,9 @@ def fetch_obhistory(station, tz_name):
                     return col
         return None
 
-    date_col = find_col([["date/time"], ["date"]])
-    temp_col = find_col([["temp"], ["air"]])
+    date_col = find_col([["date", "time"], ["date"]])
+    time_col = find_col([["time"]])
+    temp_col = find_col([["temperature", "air"], ["temp", "air"], ["air"]])
     dew_col = find_col([["dew"]])
     rh_col = find_col([["relative", "humidity"], ["humidity"]])
     heat_col = find_col([["heat", "index"]])
@@ -831,6 +847,10 @@ def fetch_obhistory(station, tz_name):
 
     for _, r in df.iterrows():
         raw_dt = str(r.get(date_col, "")).strip() if date_col else ""
+        if date_col and time_col and date_col != time_col and raw_dt and raw_dt.lower() != "nan":
+            raw_time = str(r.get(time_col, "")).strip()
+            if raw_time and raw_time.lower() != "nan" and raw_time not in raw_dt:
+                raw_dt = f"{raw_dt} {raw_time}"
         if not raw_dt or raw_dt.lower() == "nan":
             continue
 
