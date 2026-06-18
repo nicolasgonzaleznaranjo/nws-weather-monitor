@@ -1281,6 +1281,16 @@ def plot_temperature(timeline, today_hi, today_lo, tomorrow_hi, tomorrow_lo, x_s
     xaxis_config = dict(gridcolor="#262b35")
     if x_start is not None and x_end is not None:
         xaxis_config["range"] = [x_start, x_end]
+        tickvals = []
+        tick = x_start
+        while tick <= x_end:
+            tickvals.append(tick)
+            tick += timedelta(hours=6)
+        if tickvals[-1] != x_end:
+            tickvals.append(x_end)
+        xaxis_config["tickmode"] = "array"
+        xaxis_config["tickvals"] = tickvals
+        xaxis_config["tickformat"] = "%H:%M<br>%b %-d, %Y"
 
     fig.update_layout(
         height=380,
@@ -1349,7 +1359,7 @@ timeline = build_timeline(observed_df, forecast_df, tz_name)
 today = now.date()
 tomorrow = today + timedelta(days=1)
 x_start = datetime.combine(today, time.min, tzinfo=ZoneInfo(tz_name))
-x_end = datetime.combine(tomorrow, time(23, 59), tzinfo=ZoneInfo(tz_name))
+x_end = datetime.combine(tomorrow + timedelta(days=1), time.min, tzinfo=ZoneInfo(tz_name))
 today_hi, today_lo = projected_extremes_for_date(observed_df, forecast_df, today, tz_name)
 tomorrow_hi, tomorrow_lo = projected_extremes_for_date(observed_df, forecast_df, tomorrow, tz_name)
 chart_today_hi, chart_today_lo = extremes_for_date(timeline, today)
