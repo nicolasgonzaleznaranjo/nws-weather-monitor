@@ -69,6 +69,29 @@ DIGITAL_FORECAST_URLS_BY_STATION = {
     "KDCA": "https://forecast.weather.gov/MapClick.php?lat=38.8514&lon=-77.0377&lg=english&&FcstType=digital",
 }
 
+OBSERVED_URLS_BY_STATION = {
+    "KATL": "https://forecast.weather.gov/data/obhistory/KATL.html",
+    "KAUS": "https://forecast.weather.gov/data/obhistory/KAUS.html",
+    "KBOS": "https://forecast.weather.gov/data/obhistory/KBOS.html",
+    "KMDW": "https://forecast.weather.gov/data/obhistory/KMDW.html",
+    "KDFW": "https://forecast.weather.gov/data/obhistory/KDFW.html",
+    "KDEN": "https://forecast.weather.gov/data/obhistory/KDEN.html",
+    "KHOU": "https://forecast.weather.gov/data/obhistory/KHOU.html",
+    "KLAS": "https://www.weather.gov/wrh/timeseries?site=KLAS",
+    "KLAX": "https://www.weather.gov/wrh/timeseries?site=KLAX",
+    "KMIA": "https://forecast.weather.gov/data/obhistory/KMIA.html",
+    "KMSP": "https://forecast.weather.gov/data/obhistory/KMSP.html",
+    "KMSY": "https://forecast.weather.gov/data/obhistory/KMSY.html",
+    "KNYC": "https://forecast.weather.gov/data/obhistory/KNYC.html",
+    "KOKC": "https://forecast.weather.gov/data/obhistory/KOKC.html",
+    "KPHL": "https://forecast.weather.gov/data/obhistory/KPHL.html",
+    "KPHX": "https://www.weather.gov/wrh/timeseries?site=KPHX",
+    "KSAT": "https://forecast.weather.gov/data/obhistory/KSAT.html",
+    "KSFO": "https://www.weather.gov/wrh/timeseries?site=KSFO",
+    "KSEA": "https://www.weather.gov/wrh/timeseries?site=KSEA",
+    "KDCA": "https://forecast.weather.gov/data/obhistory/KDCA.html",
+}
+
 KALSHI_MARKETS = {
     "Atlanta": {"low": ("kxlowtatl", "atlanta-daily-low-temperature"), "high": ("kxhightatl", "atlanta-max-temperature")},
     "Austin": {"low": ("kxlowtaus", "austin-low-temperature"), "high": ("kxhighaus", "highest-temperature-in-austin")},
@@ -608,6 +631,21 @@ def _parse_obhistory_html(html_text):
     return pd.DataFrame()
 
 
+def _parse_wrh_timeseries_html(html_text):
+    tables = pd.read_html(StringIO(html_text))
+    for table in tables:
+        table.columns = [
+            " ".join(str(part).strip() for part in col if str(part).strip() and not str(part).startswith("Unnamed"))
+            if isinstance(col, tuple)
+            else str(col).strip()
+            for col in table.columns
+        ]
+        joined = " ".join(table.columns).lower()
+        if "temp" in joined and ("date" in joined or "time" in joined):
+            return table
+    return pd.DataFrame()
+
+
 def parse_obhistory_datetime(raw_dt, now, tz):
     text = str(raw_dt).replace("\xa0", " ").strip()
     text = re.sub(r"\s+", " ", text)
@@ -749,20 +787,23 @@ def fetch_observations_for_day(station, tz_name, target_date):
 
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_obhistory(station, tz_name):
-    url = f"https://forecast.weather.gov/data/obhistory/{station}.html"
+    url = OBSERVED_URLS_BY_STATION.get(station, f"https://forecast.weather.gov/data/obhistory/{station}.html")
     try:
         response = requests.get(url, headers={"User-Agent": NWS_HEADERS["User-Agent"]}, timeout=25)
         response.raise_for_status()
     except Exception:
-        return fetch_observations_api(station, tz_name)
+        return pd.DataFrame()
 
     try:
-        df = _parse_obhistory_html(response.text)
+        if "wrh/timeseries" in url:
+            df = _parse_wrh_timeseries_html(response.text)
+        else:
+            df = _parse_obhistory_html(response.text)
     except Exception:
-        return fetch_observations_api(station, tz_name)
+        return pd.DataFrame()
 
     if df.empty:
-        return fetch_observations_api(station, tz_name)
+        return pd.DataFrame()
 
     df.columns = [str(c).strip() for c in df.columns]
 
@@ -832,7 +873,7 @@ def fetch_obhistory(station, tz_name):
     if not out.empty:
         out = out.sort_values("datetime").reset_index(drop=True)
     else:
-        out = fetch_observations_api(station, tz_name)
+        out = pd.DataFrame()
     return out
 
 # -----------------------------
