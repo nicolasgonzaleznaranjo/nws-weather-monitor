@@ -92,6 +92,8 @@ OBSERVED_URLS_BY_STATION = {
     "KDCA": "https://forecast.weather.gov/data/obhistory/KDCA.html",
 }
 
+WRH_OBS_STATIONS = {"KLAS", "KLAX", "KPHX", "KSFO", "KSEA"}
+
 KALSHI_MARKETS = {
     "Atlanta": {"low": ("kxlowtatl", "atlanta-daily-low-temperature"), "high": ("kxhightatl", "atlanta-max-temperature")},
     "Austin": {"low": ("kxlowtaus", "austin-low-temperature"), "high": ("kxhighaus", "highest-temperature-in-austin")},
@@ -851,6 +853,8 @@ def fetch_obhistory(station, tz_name):
         response = requests.get(url, headers={"User-Agent": NWS_HEADERS["User-Agent"]}, timeout=25)
         response.raise_for_status()
     except Exception:
+        if station in WRH_OBS_STATIONS:
+            return fetch_observations_api(station, tz_name)
         return pd.DataFrame()
 
     try:
@@ -859,9 +863,13 @@ def fetch_obhistory(station, tz_name):
         else:
             df = _parse_obhistory_html(response.text)
     except Exception:
+        if station in WRH_OBS_STATIONS:
+            return fetch_observations_api(station, tz_name)
         return pd.DataFrame()
 
     if df.empty:
+        if station in WRH_OBS_STATIONS:
+            return fetch_observations_api(station, tz_name)
         return pd.DataFrame()
 
     df.columns = [str(c).strip() for c in df.columns]
@@ -1246,7 +1254,7 @@ def render_links():
     st.markdown("".join(html), unsafe_allow_html=True)
 
 
-def plot_temperature(timeline, today_hi, today_lo, tomorrow_hi, tomorrow_lo):
+def plot_temperature(timeline, today_hi, today_lo, tomorrow_hi, tomorrow_lo, x_start=None, x_end=None):
     fig = go.Figure()
     for source, color in [("OBSERVED", "#ff5a3d"), ("FORECAST", "#5b6cff")]:
         d = timeline[timeline["source"] == source]
@@ -1270,6 +1278,10 @@ def plot_temperature(timeline, today_hi, today_lo, tomorrow_hi, tomorrow_lo):
                 textfont=dict(size=13, color="white")
             ))
 
+    xaxis_config = dict(gridcolor="#262b35")
+    if x_start is not None and x_end is not None:
+        xaxis_config["range"] = [x_start, x_end]
+
     fig.update_layout(
         height=380,
         margin=dict(l=10, r=10, t=20, b=10),
@@ -1277,7 +1289,7 @@ def plot_temperature(timeline, today_hi, today_lo, tomorrow_hi, tomorrow_lo):
         plot_bgcolor="#0e1117",
         font=dict(color="#f5f5f5"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        xaxis=dict(gridcolor="#262b35"),
+        xaxis=xaxis_config,
         yaxis=dict(title="Temperature (°F)", gridcolor="#262b35"),
     )
     return fig
@@ -1336,6 +1348,8 @@ except Exception:
 timeline = build_timeline(observed_df, forecast_df, tz_name)
 today = now.date()
 tomorrow = today + timedelta(days=1)
+x_start = datetime.combine(today, time.min, tzinfo=ZoneInfo(tz_name))
+x_end = datetime.combine(tomorrow, time(23, 59), tzinfo=ZoneInfo(tz_name))
 today_hi, today_lo = projected_extremes_for_date(observed_df, forecast_df, today, tz_name)
 tomorrow_hi, tomorrow_lo = projected_extremes_for_date(observed_df, forecast_df, tomorrow, tz_name)
 chart_today_hi, chart_today_lo = extremes_for_date(timeline, today)
@@ -1378,7 +1392,7 @@ with st.expander("Tomorrow projected temperatures", expanded=False):
 
 if not timeline.empty:
     st.plotly_chart(
-        plot_temperature(timeline, chart_today_hi, chart_today_lo, chart_tomorrow_hi, chart_tomorrow_lo),
+        plot_temperature(timeline, chart_today_hi, chart_today_lo, chart_tomorrow_hi, chart_tomorrow_lo, x_start, x_end),
         use_container_width=True,
     )
 else:
